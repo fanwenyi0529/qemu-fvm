@@ -601,6 +601,7 @@ CYGWIN*)
 MINGW32*)
   mingw32="yes"
   audio_possible_drivers="dsound sdl"
+  QEMU_INCLUDES="-I\$(SRC_PATH)/linux-headers -I$(pwd)/linux-headers $QEMU_INCLUDES"
   if check_include dsound.h; then
     audio_drv_list="dsound"
   else
@@ -5257,7 +5258,7 @@ if test "$gcov" = "yes" ; then
 fi
 
 # use included Linux headers
-if test "$linux" = "yes" ; then
+if test "$kvm" = "yes" ; then
   mkdir -p linux-headers
   case "$cpu" in
   i386|x86_64|x32)
