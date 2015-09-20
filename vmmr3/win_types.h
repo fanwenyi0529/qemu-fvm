@@ -36,11 +36,9 @@ typedef signed long long __s64;
 //#define long long long
 #define ul ull
 #define UL ULL
-typedef unsigned long sigset_t;
 typedef unsigned long pteval_t;
-typedef unsigned long ulong;
+typedef unsigned long long ulong;
 #elif defined(HOST_I386)
-typedef unsigned long sigset_t;
 typedef unsigned long pteval_t;
 typedef unsigned long ulong;
 #else
