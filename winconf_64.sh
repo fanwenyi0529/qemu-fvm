@@ -1,0 +1,1 @@
+bash configure --disable-tcg-interpreter --disable-gtk --enable-sdl --audio-drv-list=dsound --target-list=x86_64-softmmu --enable-vnc --cc=gcc --with-sdlabi=2.0 --enable-kvm
