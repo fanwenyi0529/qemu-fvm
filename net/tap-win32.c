@@ -356,7 +356,9 @@ static int get_device_guid(
                 &len);
 
             if (status != ERROR_SUCCESS || name_type != REG_SZ) {
-                    return -1;
+                    /* iterate all taps*/
+                    ++i;
+                    continue;
             }
             else {
                 if (is_tap_win32_dev(enum_name)) {
