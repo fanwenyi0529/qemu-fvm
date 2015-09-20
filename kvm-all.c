@@ -13,9 +13,6 @@
  *
  */
 
-#include <sys/types.h>
-#include <sys/ioctl.h>
-#include <sys/mman.h>
 #include <stdarg.h>
 
 #include <linux/kvm.h>
@@ -64,7 +61,11 @@ struct KVMState
     AccelState parent_obj;
 
     int nr_slots;
+#ifdef _WIN32
+    HANDLE fd;
+#else
     int fd;
+#endif
     int vmfd;
     int coalesced_mmio;
     struct kvm_coalesced_mmio_ring *coalesced_mmio_ring;
@@ -110,6 +111,8 @@ bool kvm_gsi_direct_mapping;
 bool kvm_allowed;
 bool kvm_readonly_mem_allowed;
 bool kvm_vm_attributes_allowed;
+
+#include "vmmr3/vmmr3_call_r0.h"
 
 static const KVMCapabilityInfo kvm_required_capabilites[] = {
     KVM_CAP_INFO(USER_MEMORY),
@@ -222,7 +225,7 @@ static int kvm_set_user_memory_region(KVMMemoryListener *kml, KVMSlot *slot)
 
     mem.slot = slot->slot | (kml->as_id << 16);
     mem.guest_phys_addr = slot->start_addr;
-    mem.userspace_addr = (unsigned long)slot->ram;
+    mem.userspace_addr = (__u64)slot->ram;
     mem.flags = slot->flags;
 
     if (slot->memory_size && mem.flags & KVM_MEM_READONLY) {
@@ -238,31 +241,27 @@ static int kvm_set_user_memory_region(KVMMemoryListener *kml, KVMSlot *slot)
 int kvm_init_vcpu(CPUState *cpu)
 {
     KVMState *s = kvm_state;
-    long mmap_size;
     int ret;
 
     DPRINTF("kvm_init_vcpu\n");
 
-    ret = kvm_vm_ioctl(s, KVM_CREATE_VCPU, (void *)kvm_arch_vcpu_id(cpu));
+    ret = kvm_vm_ioctl(s, KVM_CREATE_VCPU, kvm_arch_vcpu_id(cpu));
     if (ret < 0) {
         DPRINTF("kvm_create_vcpu failed\n");
         goto err;
     }
 
     cpu->kvm_fd = ret;
+#ifdef _WIN32
+    cpu->kvm_handle = vmmr3_get_vmmr0_handle();
+    cpu->kick_event = vmmr3_get_kick_event(s, cpu->kvm_fd);
+#endif
     cpu->kvm_state = s;
     cpu->kvm_vcpu_dirty = true;
 
-    mmap_size = kvm_ioctl(s, KVM_GET_VCPU_MMAP_SIZE, 0);
-    if (mmap_size < 0) {
-        ret = mmap_size;
-        DPRINTF("KVM_GET_VCPU_MMAP_SIZE failed\n");
-        goto err;
-    }
+    cpu->kvm_run = vmmr3_get_vmmr0_run(s, cpu->kvm_fd);
 
-    cpu->kvm_run = mmap(NULL, mmap_size, PROT_READ | PROT_WRITE, MAP_SHARED,
-                        cpu->kvm_fd, 0);
-    if (cpu->kvm_run == MAP_FAILED) {
+    if (cpu->kvm_run == NULL) {
         ret = -errno;
         DPRINTF("mmap'ing vcpu state failed\n");
         goto err;
@@ -270,7 +269,7 @@ int kvm_init_vcpu(CPUState *cpu)
 
     if (s->coalesced_mmio && !s->coalesced_mmio_ring) {
         s->coalesced_mmio_ring =
-            (void *)cpu->kvm_run + s->coalesced_mmio * PAGE_SIZE;
+            s->coalesced_mmio_ring = vmmr3_get_coalesced_mmio(s, cpu->kvm_fd, cpu->kvm_run);
     }
 
     ret = kvm_arch_init_vcpu(cpu);
@@ -386,7 +385,7 @@ static int kvm_physical_sync_dirty_bitmap(KVMMemoryListener *kml,
                                           MemoryRegionSection *section)
 {
     KVMState *s = kvm_state;
-    unsigned long size, allocated_size = 0;
+    lpul size, allocated_size = 0;
     struct kvm_dirty_log d = {};
     KVMSlot *mem;
     int ret = 0;
@@ -1470,8 +1469,12 @@ static int kvm_init(MachineState *ms)
     QTAILQ_INIT(&s->kvm_sw_breakpoints);
 #endif
     s->vmfd = -1;
-    s->fd = qemu_open("/dev/kvm", O_RDWR);
+    s->fd = vmmr3_open();
+#ifdef _WIN32
+    if (s->fd == INVALID_HANDLE_VALUE) {
+#else
     if (s->fd == -1) {
+#endif
         fprintf(stderr, "Could not access KVM kernel module: %m\n");
         ret = -errno;
         goto err;
@@ -1657,8 +1660,12 @@ err:
     if (s->vmfd >= 0) {
         close(s->vmfd);
     }
+#ifdef _WIN32
+    if (s->fd != INVALID_HANDLE_VALUE) {
+#else
     if (s->fd != -1) {
-        close(s->fd);
+#endif
+        vmmr3_close(s->fd);
     }
     g_free(s->memory_listener.slots);
 
@@ -1925,7 +1932,7 @@ int kvm_ioctl(KVMState *s, int type, ...)
     va_end(ap);
 
     trace_kvm_ioctl(type, arg);
-    ret = ioctl(s->fd, type, arg);
+    ret = vmmr3_ioctl(s->fd, type, arg);
     if (ret == -1) {
         ret = -errno;
     }
@@ -1943,7 +1950,7 @@ int kvm_vm_ioctl(KVMState *s, int type, ...)
     va_end(ap);
 
     trace_kvm_vm_ioctl(type, arg);
-    ret = ioctl(s->vmfd, type, arg);
+    ret = vmmr3_vm_ioctl(s->vmfd, type, arg);
     if (ret == -1) {
         ret = -errno;
     }
@@ -1961,7 +1968,11 @@ int kvm_vcpu_ioctl(CPUState *cpu, int type, ...)
     va_end(ap);
 
     trace_kvm_vcpu_ioctl(cpu->cpu_index, type, arg);
-    ret = ioctl(cpu->kvm_fd, type, arg);
+#ifdef _WIN32
+    ret = vmmr3_vcpu_ioctl(cpu->kvm_fd, cpu->kvm_handle, type, arg);
+#else
+    ret = vmmr3_vcpu_ioctl(cpu->kvm_fd, type, arg);
+#endif
     if (ret == -1) {
         ret = -errno;
     }
@@ -1979,7 +1990,7 @@ int kvm_device_ioctl(int fd, int type, ...)
     va_end(ap);
 
     trace_kvm_device_ioctl(fd, type, arg);
-    ret = ioctl(fd, type, arg);
+    ret = vmmr3_ioctl(fd, type, arg);
     if (ret == -1) {
         ret = -errno;
     }
@@ -2060,8 +2071,27 @@ int kvm_has_intx_set_mask(void)
     return kvm_state->intx_set_mask;
 }
 
+void *kvm_ram_alloc(size_t size, uint64_t *align)
+{
+#ifdef CONFIG_WIN32
+    return vmmr3_alloc_kmem(size);
+#else
+    return qemu_anon_ram_alloc(size, align);
+#endif
+}
+
+void kvm_ram_free(void* ptr, size_t size)
+{
+#ifdef CONFIG_WIN32
+    vmmr3_free_kmem(ptr);
+#else
+    qemu_anon_ram_free(ptr, size);
+#endif
+}
+
 void kvm_setup_guest_memory(void *start, size_t size)
 {
+#ifdef CONFIG_LINUX
     if (!kvm_has_sync_mmu()) {
         int ret = qemu_madvise(start, size, QEMU_MADV_DONTFORK);
 
@@ -2072,6 +2102,8 @@ void kvm_setup_guest_memory(void *start, size_t size)
             exit(1);
         }
     }
+#elif defined(CONFIG_WINDOWS)
+#endif
 }
 
 #ifdef KVM_CAP_SET_GUEST_DEBUG
@@ -2107,7 +2139,7 @@ static void kvm_invoke_set_guest_debug(void *data)
                                    &dbg_data->dbg);
 }
 
-int kvm_update_guest_debug(CPUState *cpu, unsigned long reinject_trap)
+int kvm_update_guest_debug(CPUState *cpu, lpul reinject_trap)
 {
     struct kvm_set_guest_debug_data data;
 
@@ -2229,7 +2261,7 @@ void kvm_remove_all_breakpoints(CPUState *cpu)
 
 #else /* !KVM_CAP_SET_GUEST_DEBUG */
 
-int kvm_update_guest_debug(CPUState *cpu, unsigned long reinject_trap)
+int kvm_update_guest_debug(CPUState *cpu, lpul reinject_trap)
 {
     return -EINVAL;
 }

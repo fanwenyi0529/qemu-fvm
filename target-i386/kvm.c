@@ -13,10 +13,6 @@
  */
 
 #include <assert.h>
-#include <sys/types.h>
-#include <sys/ioctl.h>
-#include <sys/mman.h>
-#include <sys/utsname.h>
 
 #include <linux/kvm.h>
 #include <linux/kvm_para.h>
@@ -894,15 +890,26 @@ int kvm_arch_init(MachineState *ms, KVMState *s)
     uint64_t identity_base = 0xfffbc000;
     uint64_t shadow_mem;
     int ret;
-    struct utsname utsname;
 
     ret = kvm_get_supported_msrs(s);
     if (ret < 0) {
         return ret;
     }
 
+#ifdef CONFIG_LINUX
+    struct utsname utsname;
+
     uname(&utsname);
     lm_capable_kernel = strcmp(utsname.machine, "x86_64") == 0;
+#elif defined(CONFIG_WIN32)
+#ifdef HOST_X86_64
+    lm_capable_kernel = 1;
+#else
+    lm_capable_kernel = 0;
+#endif
+#else
+#error "unsupported host!"
+#endif
 
     /*
      * On older Intel CPUs, KVM uses vm86 mode to emulate 16-bit code directly.

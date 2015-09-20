@@ -40,6 +40,7 @@ int event_notifier_set_handler(EventNotifier *, EventNotifierHandler *);
 void event_notifier_init_fd(EventNotifier *, int fd);
 int event_notifier_get_fd(EventNotifier *);
 #else
+int event_notifier_get_fd(EventNotifier *);
 HANDLE event_notifier_get_handle(EventNotifier *);
 #endif
 

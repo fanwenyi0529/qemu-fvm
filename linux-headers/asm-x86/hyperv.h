@@ -1,7 +1,7 @@
 #ifndef _ASM_X86_HYPERV_H
 #define _ASM_X86_HYPERV_H
 
-#include <linux/types.h>
+#include "vmmr3/os_interface.h"
 
 /*
  * The below CPUID leaves are present if VersionAndFeatures.HypervisorPresent

@@ -6,8 +6,7 @@
  *
  */
 
-#include <linux/types.h>
-#include <linux/ioctl.h>
+#include "vmmr3/os_interface.h"
 
 #define DE_VECTOR 0
 #define DB_VECTOR 1

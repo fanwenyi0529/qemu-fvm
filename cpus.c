@@ -798,7 +798,6 @@ static void qemu_tcg_init_cpu_signals(void)
 #else /* _WIN32 */
 static void qemu_kvm_init_cpu_signals(CPUState *cpu)
 {
-    abort();
 }
 
 static void qemu_tcg_init_cpu_signals(void)
@@ -1091,6 +1090,12 @@ static void qemu_cpu_kick_thread(CPUState *cpu)
         exit(1);
     }
 #else /* _WIN32 */
+#ifdef CONFIG_KVM
+    if (kvm_enabled()) {
+		cpu->kvm_run->exit_request = 1;
+		SetEvent(cpu->kick_event);
+    } else
+#endif
     if (!qemu_cpu_is_self(cpu)) {
         CONTEXT tcgContext;
 
@@ -1130,16 +1135,12 @@ void qemu_cpu_kick(CPUState *cpu)
 
 void qemu_cpu_kick_self(void)
 {
-#ifndef _WIN32
     assert(current_cpu);
 
     if (!current_cpu->thread_kicked) {
         qemu_cpu_kick_thread(current_cpu);
         current_cpu->thread_kicked = true;
     }
-#else
-    abort();
-#endif
 }
 
 bool qemu_cpu_is_self(CPUState *cpu)

@@ -1454,6 +1454,12 @@ static ram_addr_t ram_block_add(RAMBlock *new_block, Error **errp)
             xen_ram_alloc(new_block->offset, new_block->max_length,
                           new_block->mr);
         } else {
+#ifdef CONFIG_KVM
+        if (kvm_enabled())
+            new_block->host = kvm_ram_alloc(new_block->max_length,
+                                             &new_block->mr->align);
+        else
+#endif
             new_block->host = phys_mem_alloc(new_block->max_length,
                                              &new_block->mr->align);
             if (!new_block->host) {
@@ -1660,7 +1666,12 @@ static void reclaim_ramblock(RAMBlock *block)
         close(block->fd);
 #endif
     } else {
-        qemu_anon_ram_free(block->host, block->max_length);
+#ifdef CONFIG_KVM
+        if (kvm_enabled())
+            kvm_ram_free(block->host, block->max_length);
+        else
+#endif
+            qemu_anon_ram_free(block->host, block->max_length);
     }
     g_free(block);
 }
@@ -1730,6 +1741,10 @@ void qemu_ram_remap(ram_addr_t addr, ram_addr_t length)
             }
         }
     }
+}
+#else
+void qemu_ram_remap(ram_addr_t addr, ram_addr_t length)
+{
 }
 #endif /* !_WIN32 */
 

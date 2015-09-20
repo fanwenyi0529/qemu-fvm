@@ -64,6 +64,18 @@
 #endif
 
 #if defined(_WIN64)
+typedef unsigned long long lpul;
+typedef long long lpl;
+#define LPUL(x) x##ull
+#define LPL(x) x##ll
+#else
+typedef unsigned long lpul;
+typedef long lpl;
+#define LPUL(x) x##ul
+#define LPL(x) x##l
+#endif
+
+#if defined(_WIN64)
 /* On w64, setjmp is implemented by _setjmp which needs a second parameter.
  * If this parameter is NULL, longjump does no stack unwinding.
  * That is what we need for QEMU. Passing the value of register rsp (default)

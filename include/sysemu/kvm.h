@@ -194,6 +194,11 @@ int kvm_cpu_exec(CPUState *cpu);
 
 #ifdef NEED_CPU_H
 
+#if !defined(CONFIG_USER_ONLY)
+void *kvm_ram_alloc(size_t size, uint64_t *align);
+void  kvm_ram_free(void* ptr, size_t size);
+#endif
+
 void kvm_setup_guest_memory(void *start, size_t size);
 void kvm_flush_coalesced_mmio_buffer(void);
 
@@ -202,10 +207,8 @@ int kvm_insert_breakpoint(CPUState *cpu, target_ulong addr,
 int kvm_remove_breakpoint(CPUState *cpu, target_ulong addr,
                           target_ulong len, int type);
 void kvm_remove_all_breakpoints(CPUState *cpu);
-int kvm_update_guest_debug(CPUState *cpu, unsigned long reinject_trap);
-#ifndef _WIN32
+int kvm_update_guest_debug(CPUState *cpu, lpul reinject_trap);
 int kvm_set_signal_mask(CPUState *cpu, const sigset_t *sigset);
-#endif
 
 int kvm_on_sigbus_vcpu(CPUState *cpu, int code, void *addr);
 int kvm_on_sigbus(int code, void *addr);
