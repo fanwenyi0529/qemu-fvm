@@ -118,7 +118,7 @@ static int vhost_scsi_start(VHostSCSI *s)
      * enabling/disabling irqfd.
      */
     for (i = 0; i < s->dev.nvqs; i++) {
-        vhost_virtqueue_mask(&s->dev, vdev, i, false);
+        vhost_virtqueue_mask(&s->dev, vdev, s->dev.vq_index + i, false);
     }
 
     return ret;
@@ -277,6 +277,7 @@ static void vhost_scsi_unrealize(DeviceState *dev, Error **errp)
     /* This will stop vhost backend. */
     vhost_scsi_set_status(vdev, 0);
 
+    vhost_dev_cleanup(&s->dev);
     g_free(s->dev.vqs);
 
     virtio_scsi_common_unrealize(dev, errp);
@@ -291,7 +292,7 @@ static char *vhost_scsi_get_fw_dev_path(FWPathProvider *p, BusState *bus,
 {
     VHostSCSI *s = VHOST_SCSI(dev);
     /* format: channel@channel/vhost-scsi@target,lun */
-    return g_strdup_printf("channel@%x/%s@%x,%x", s->channel,
+    return g_strdup_printf("/channel@%x/%s@%x,%x", s->channel,
                            qdev_fw_name(dev), s->target, s->lun);
 }
 

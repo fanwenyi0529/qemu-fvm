@@ -25,7 +25,6 @@
 #include "sysemu/qtest.h"
 #include "qemu/timer.h"
 #include "exec/address-spaces.h"
-#include "exec/memory-internal.h"
 #include "qemu/rcu.h"
 #include "exec/tb-hash.h"
 
@@ -136,52 +135,6 @@ static void init_delay_params(SyncClocks *sc, const CPUState *cpu)
 }
 #endif /* CONFIG USER ONLY */
 
-void QEMU_NORETURN cpu_loop_exit(CPUState *cpu)
-{
-    cpu->current_tb = NULL;
-    siglongjmp(cpu->jmp_env, 1);
-}
-
-/* exit the current TB from a signal handler. The host registers are
-   restored in a state compatible with the CPU emulator
- */
-#if defined(CONFIG_SOFTMMU)
-void QEMU_NORETURN cpu_resume_from_signal(CPUState *cpu, void *puc)
-{
-    /* XXX: restore cpu registers saved in host registers */
-
-    cpu->exception_index = -1;
-    siglongjmp(cpu->jmp_env, 1);
-}
-
-void cpu_reload_memory_map(CPUState *cpu)
-{
-    AddressSpaceDispatch *d;
-
-    if (qemu_in_vcpu_thread()) {
-        /* Do not let the guest prolong the critical section as much as it
-         * as it desires.
-         *
-         * Currently, this is prevented by the I/O thread's periodinc kicking
-         * of the VCPU thread (iothread_requesting_mutex, qemu_cpu_kick_thread)
-         * but this will go away once TCG's execution moves out of the global
-         * mutex.
-         *
-         * This pair matches cpu_exec's rcu_read_lock()/rcu_read_unlock(), which
-         * only protects cpu->as->dispatch.  Since we reload it below, we can
-         * split the critical section.
-         */
-        rcu_read_unlock();
-        rcu_read_lock();
-    }
-
-    /* The CPU and TLB are protected by the iothread lock.  */
-    d = atomic_rcu_read(&cpu->as->dispatch);
-    cpu->memory_dispatch = d;
-    tlb_flush(cpu, 1);
-}
-#endif
-
 /* Execute a TB, and fix up the CPU state afterwards if necessary */
 static inline tcg_target_ulong cpu_tb_exec(CPUState *cpu, uint8_t *tb_ptr)
 {
@@ -204,7 +157,7 @@ static inline tcg_target_ulong cpu_tb_exec(CPUState *cpu, uint8_t *tb_ptr)
     }
 #endif /* DEBUG_DISAS */
 
-    cpu->can_do_io = 0;
+    cpu->can_do_io = !use_icount;
     next_tb = tcg_qemu_tb_exec(env, tb_ptr);
     cpu->can_do_io = 1;
     trace_exec_tb_exit((void *) (next_tb & ~TB_EXIT_MASK),
@@ -239,19 +192,15 @@ static void cpu_exec_nocache(CPUState *cpu, int max_cycles,
                              TranslationBlock *orig_tb)
 {
     TranslationBlock *tb;
-    target_ulong pc = orig_tb->pc;
-    target_ulong cs_base = orig_tb->cs_base;
-    uint64_t flags = orig_tb->flags;
 
     /* Should never happen.
        We only end up here when an existing TB is too long.  */
     if (max_cycles > CF_COUNT_MASK)
         max_cycles = CF_COUNT_MASK;
 
-    /* tb_gen_code can flush our orig_tb, invalidate it now */
-    tb_phys_invalidate(orig_tb, -1);
-    tb = tb_gen_code(cpu, pc, cs_base, flags,
+    tb = tb_gen_code(cpu, orig_tb->pc, orig_tb->cs_base, orig_tb->flags,
                      max_cycles | CF_NOCACHE);
+    tb->orig_tb = tcg_ctx.tb_ctx.tb_invalidated_flag ? NULL : orig_tb;
     cpu->current_tb = tb;
     /* execute the generated code */
     trace_exec_tb_nocache(tb, tb->pc);
@@ -261,10 +210,10 @@ static void cpu_exec_nocache(CPUState *cpu, int max_cycles,
     tb_free(tb);
 }
 
-static TranslationBlock *tb_find_slow(CPUState *cpu,
-                                      target_ulong pc,
-                                      target_ulong cs_base,
-                                      uint64_t flags)
+static TranslationBlock *tb_find_physical(CPUState *cpu,
+                                          target_ulong pc,
+                                          target_ulong cs_base,
+                                          uint64_t flags)
 {
     CPUArchState *env = (CPUArchState *)cpu->env_ptr;
     TranslationBlock *tb, **ptb1;
@@ -281,8 +230,9 @@ static TranslationBlock *tb_find_slow(CPUState *cpu,
     ptb1 = &tcg_ctx.tb_ctx.tb_phys_hash[h];
     for(;;) {
         tb = *ptb1;
-        if (!tb)
-            goto not_found;
+        if (!tb) {
+            return NULL;
+        }
         if (tb->pc == pc &&
             tb->page_addr[0] == phys_page1 &&
             tb->cs_base == cs_base &&
@@ -294,25 +244,59 @@ static TranslationBlock *tb_find_slow(CPUState *cpu,
                 virt_page2 = (pc & TARGET_PAGE_MASK) +
                     TARGET_PAGE_SIZE;
                 phys_page2 = get_page_addr_code(env, virt_page2);
-                if (tb->page_addr[1] == phys_page2)
-                    goto found;
+                if (tb->page_addr[1] == phys_page2) {
+                    break;
+                }
             } else {
-                goto found;
+                break;
             }
         }
         ptb1 = &tb->phys_hash_next;
     }
- not_found:
-   /* if no translated code available, then translate it now */
+
+    /* Move the TB to the head of the list */
+    *ptb1 = tb->phys_hash_next;
+    tb->phys_hash_next = tcg_ctx.tb_ctx.tb_phys_hash[h];
+    tcg_ctx.tb_ctx.tb_phys_hash[h] = tb;
+    return tb;
+}
+
+static TranslationBlock *tb_find_slow(CPUState *cpu,
+                                      target_ulong pc,
+                                      target_ulong cs_base,
+                                      uint64_t flags)
+{
+    TranslationBlock *tb;
+
+    tb = tb_find_physical(cpu, pc, cs_base, flags);
+    if (tb) {
+        goto found;
+    }
+
+#ifdef CONFIG_USER_ONLY
+    /* mmap_lock is needed by tb_gen_code, and mmap_lock must be
+     * taken outside tb_lock.  Since we're momentarily dropping
+     * tb_lock, there's a chance that our desired tb has been
+     * translated.
+     */
+    tb_unlock();
+    mmap_lock();
+    tb_lock();
+    tb = tb_find_physical(cpu, pc, cs_base, flags);
+    if (tb) {
+        mmap_unlock();
+        goto found;
+    }
+#endif
+
+    /* if no translated code available, then translate it now */
     tb = tb_gen_code(cpu, pc, cs_base, flags, 0);
 
- found:
-    /* Move the last found TB to the head of the list */
-    if (likely(*ptb1)) {
-        *ptb1 = tb->phys_hash_next;
-        tb->phys_hash_next = tcg_ctx.tb_ctx.tb_phys_hash[h];
-        tcg_ctx.tb_ctx.tb_phys_hash[h] = tb;
-    }
+#ifdef CONFIG_USER_ONLY
+    mmap_unlock();
+#endif
+
+found:
     /* we add the TB in the virtual pc hash table */
     cpu->tb_jmp_cache[tb_jmp_cache_hash_func(pc)] = tb;
     return tb;
@@ -353,8 +337,6 @@ static void cpu_handle_debug_exception(CPUState *cpu)
 
 /* main execution loop */
 
-volatile sig_atomic_t exit_request;
-
 int cpu_exec(CPUState *cpu)
 {
     CPUClass *cc = CPU_GET_CLASS(cpu);
@@ -368,9 +350,6 @@ int cpu_exec(CPUState *cpu)
     uintptr_t next_tb;
     SyncClocks sc;
 
-    /* This must be volatile so it is not trashed by longjmp() */
-    volatile bool have_tb_lock = false;
-
     if (cpu->halted) {
         if (!cpu_has_work(cpu)) {
             return EXCP_HALTED;
@@ -380,18 +359,10 @@ int cpu_exec(CPUState *cpu)
     }
 
     current_cpu = cpu;
-
-    /* As long as current_cpu is null, up to the assignment just above,
-     * requests by other threads to exit the execution loop are expected to
-     * be issued using the exit_request global. We must make sure that our
-     * evaluation of the global value is performed past the current_cpu
-     * value transition point, which requires a memory barrier as well as
-     * an instruction scheduling constraint on modern architectures.  */
-    smp_mb();
-
+    atomic_mb_set(&tcg_current_cpu, cpu);
     rcu_read_lock();
 
-    if (unlikely(exit_request)) {
+    if (unlikely(atomic_mb_read(&exit_request))) {
         cpu->exit_request = 1;
     }
 
@@ -487,8 +458,7 @@ int cpu_exec(CPUState *cpu)
                     cpu->exception_index = EXCP_INTERRUPT;
                     cpu_loop_exit(cpu);
                 }
-                spin_lock(&tcg_ctx.tb_ctx.tb_lock);
-                have_tb_lock = true;
+                tb_lock();
                 tb = tb_find_fast(cpu);
                 /* Note: we do it here to avoid a gcc bug on Mac OS X when
                    doing it in tb_find_slow */
@@ -510,20 +480,14 @@ int cpu_exec(CPUState *cpu)
                     tb_add_jump((TranslationBlock *)(next_tb & ~TB_EXIT_MASK),
                                 next_tb & TB_EXIT_MASK, tb);
                 }
-                have_tb_lock = false;
-                spin_unlock(&tcg_ctx.tb_ctx.tb_lock);
-
-                /* cpu_interrupt might be called while translating the
-                   TB, but before it is linked into a potentially
-                   infinite loop and becomes env->current_tb. Avoid
-                   starting execution if there is a pending interrupt. */
-                cpu->current_tb = tb;
-                barrier();
+                tb_unlock();
                 if (likely(!cpu->exit_request)) {
                     trace_exec_tb(tb, tb->pc);
                     tc_ptr = tb->tc_ptr;
                     /* execute the generated code */
+                    cpu->current_tb = tb;
                     next_tb = cpu_tb_exec(cpu, tc_ptr);
+                    cpu->current_tb = NULL;
                     switch (next_tb & TB_EXIT_MASK) {
                     case TB_EXIT_REQUESTED:
                         /* Something asked us to stop executing
@@ -531,8 +495,12 @@ int cpu_exec(CPUState *cpu)
                          * loop. Whatever requested the exit will also
                          * have set something else (eg exit_request or
                          * interrupt_request) which we will handle
-                         * next time around the loop.
+                         * next time around the loop.  But we need to
+                         * ensure the tcg_exit_req read in generated code
+                         * comes before the next read of cpu->exit_request
+                         * or cpu->interrupt_request.
                          */
+                        smp_rmb();
                         next_tb = 0;
                         break;
                     case TB_EXIT_ICOUNT_EXPIRED:
@@ -562,7 +530,6 @@ int cpu_exec(CPUState *cpu)
                         break;
                     }
                 }
-                cpu->current_tb = NULL;
                 /* Try to align the host and virtual clocks
                    if the guest is in advance */
                 align_clocks(&sc, cpu);
@@ -580,10 +547,7 @@ int cpu_exec(CPUState *cpu)
             g_assert(x86_cpu == X86_CPU(cpu));
             g_assert(env == cpu->env_ptr);
 #endif
-            if (have_tb_lock) {
-                spin_unlock(&tcg_ctx.tb_ctx.tb_lock);
-                have_tb_lock = false;
-            }
+            tb_lock_reset();
         }
     } /* for(;;) */
 
@@ -592,5 +556,8 @@ int cpu_exec(CPUState *cpu)
 
     /* fail safe : never use current_cpu outside cpu_exec() */
     current_cpu = NULL;
+
+    /* Does not need atomic_mb_set because a spurious wakeup is okay.  */
+    atomic_set(&tcg_current_cpu, NULL);
     return ret;
 }

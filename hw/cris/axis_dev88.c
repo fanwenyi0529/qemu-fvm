@@ -138,7 +138,7 @@ static void tempsensor_clkedge(struct tempsensor_t *s,
                     s->count = 16;
 
                     if ((s->regs[0] & 0xff) == 0) {
-                        /* 25 degrees celcius.  */
+                        /* 25 degrees celsius.  */
                         s->shiftreg = 0x0b9f;
                     } else if ((s->regs[0] & 0xff) == 0xff) {
                         /* Sensor ID, 0x8100 LM70.  */
@@ -277,7 +277,7 @@ void axisdev88_init(MachineState *machine)
     /* The ETRAX-FS has 128Kb on chip ram, the docs refer to it as the 
        internal memory.  */
     memory_region_init_ram(phys_intmem, NULL, "axisdev88.chipram", INTMEM_SIZE,
-                           &error_abort);
+                           &error_fatal);
     vmstate_register_ram_global(phys_intmem);
     memory_region_add_subregion(address_space_mem, 0x38000000, phys_intmem);
 

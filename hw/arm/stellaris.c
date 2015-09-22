@@ -675,7 +675,7 @@ static int stellaris_sys_init(uint32_t base, qemu_irq irq,
 {
     ssys_state *s;
 
-    s = (ssys_state *)g_malloc0(sizeof(ssys_state));
+    s = g_new0(ssys_state, 1);
     s->irq = irq;
     s->board = board;
     /* Most devices come preprogrammed with a MAC address in the user data. */
@@ -1231,13 +1231,13 @@ static void stellaris_init(const char *kernel_filename, const char *cpu_model,
 
     /* Flash programming is done via the SCU, so pretend it is ROM.  */
     memory_region_init_ram(flash, NULL, "stellaris.flash", flash_size,
-                           &error_abort);
+                           &error_fatal);
     vmstate_register_ram_global(flash);
     memory_region_set_readonly(flash, true);
     memory_region_add_subregion(system_memory, 0, flash);
 
     memory_region_init_ram(sram, NULL, "stellaris.sram", sram_size,
-                           &error_abort);
+                           &error_fatal);
     vmstate_register_ram_global(sram);
     memory_region_add_subregion(system_memory, 0x20000000, sram);
 

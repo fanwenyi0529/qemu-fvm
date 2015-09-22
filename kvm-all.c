@@ -1292,7 +1292,6 @@ int kvm_irqchip_add_adapter_route(KVMState *s, AdapterInfo *adapter)
     kroute.u.adapter.adapter_id = adapter->adapter_id;
 
     kvm_add_routing_entry(s, &kroute);
-    kvm_irqchip_commit_routes(s);
 
     return virq;
 }
@@ -1896,6 +1895,12 @@ int kvm_cpu_exec(CPUState *cpu)
             case KVM_SYSTEM_EVENT_RESET:
                 qemu_system_reset_request();
                 ret = EXCP_INTERRUPT;
+                break;
+            case KVM_SYSTEM_EVENT_CRASH:
+                qemu_mutex_lock_iothread();
+                qemu_system_guest_panicked();
+                qemu_mutex_unlock_iothread();
+                ret = 0;
                 break;
             default:
                 DPRINTF("kvm_arch_handle_exit\n");

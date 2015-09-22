@@ -5,6 +5,9 @@
 # QAPI common definitions
 { 'include': 'qapi/common.json' }
 
+# QAPI crypto definitions
+{ 'include': 'qapi/crypto.json' }
+
 # QAPI block definitions
 { 'include': 'qapi/block.json' }
 
@@ -1632,13 +1635,10 @@
 #        1) A primitive type such as 'u8', 'u16', 'bool', 'str', or 'double'.
 #           These types are mapped to the appropriate JSON type.
 #
-#        2) A legacy type in the form 'legacy<subtype>' where subtype is the
-#           legacy qdev typename.  These types are always treated as strings.
-#
-#        3) A child type in the form 'child<subtype>' where subtype is a qdev
+#        2) A child type in the form 'child<subtype>' where subtype is a qdev
 #           device type name.  Child properties create the composition tree.
 #
-#        4) A link type in the form 'link<subtype>' where subtype is a qdev
+#        3) A link type in the form 'link<subtype>' where subtype is a qdev
 #           device type name.  Link properties form the device model graph.
 #
 # Since: 1.2
@@ -1689,10 +1689,10 @@
 #
 # @property: The property name to read
 #
-# Returns: The property value.  The type depends on the property type.  legacy<>
-#          properties are returned as #str.  child<> and link<> properties are
-#          returns as #str pathnames.  All integer property types (u8, u16, etc)
-#          are returned as #int.
+# Returns: The property value.  The type depends on the property
+#          type. child<> and link<> properties are returned as #str
+#          pathnames.  All integer property types (u8, u16, etc) are
+#          returned as #int.
 #
 # Since: 1.2
 ##
@@ -2056,6 +2056,20 @@
 ##
 { 'command': 'query-dump-guest-memory-capability',
   'returns': 'DumpGuestMemoryCapability' }
+
+##
+# @dump-skeys
+#
+# Dump guest's storage keys
+#
+# @filename: the path to the file to dump to
+#
+# This command is only supported on s390 architecture.
+#
+# Since: 2.5
+##
+{ 'command': 'dump-skeys',
+  'data': { 'filename': 'str' } }
 
 ##
 # @netdev_add:

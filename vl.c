@@ -68,7 +68,7 @@ int main(int argc, char **argv)
 #include "hw/isa/isa.h"
 #include "hw/bt.h"
 #include "sysemu/watchdog.h"
-#include "hw/i386/smbios.h"
+#include "hw/smbios/smbios.h"
 #include "hw/xen/xen.h"
 #include "hw/qdev.h"
 #include "hw/loader.h"
@@ -537,10 +537,8 @@ const char *qemu_get_vm_name(void)
 
 static void res_free(void)
 {
-    if (boot_splash_filedata != NULL) {
-        g_free(boot_splash_filedata);
-        boot_splash_filedata = NULL;
-    }
+    g_free(boot_splash_filedata);
+    boot_splash_filedata = NULL;
 }
 
 static int default_driver_check(void *opaque, QemuOpts *opts, Error **errp)
@@ -1341,6 +1339,13 @@ static inline void semihosting_arg_fallback(const char *file, const char *cmd)
     }
 }
 
+/* Now we still need this for compatibility with XEN. */
+bool has_igd_gfx_passthru;
+static void igd_gfx_passthru(void)
+{
+    has_igd_gfx_passthru = current_machine->igd_gfx_passthru;
+}
+
 /***********************************************************/
 /* USB devices */
 
@@ -1741,6 +1746,15 @@ void qemu_system_reset(bool report)
         qapi_event_send_reset(&error_abort);
     }
     cpu_synchronize_all_post_reset();
+}
+
+void qemu_system_guest_panicked(void)
+{
+    if (current_cpu) {
+        current_cpu->crash_occurred = true;
+    }
+    qapi_event_send_guest_panicked(GUEST_PANIC_ACTION_PAUSE, &error_abort);
+    vm_stop(RUN_STATE_GUEST_PANICKED);
 }
 
 void qemu_system_reset_request(void)
@@ -4576,6 +4590,9 @@ int main(int argc, char **argv)
         if (foreach_device_config(DEV_USB, usb_parse) < 0)
             exit(1);
     }
+
+    /* Check if IGD GFX passthrough. */
+    igd_gfx_passthru();
 
     /* init generic devices */
     if (qemu_opts_foreach(qemu_find_opts("device"),

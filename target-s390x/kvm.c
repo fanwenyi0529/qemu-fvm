@@ -588,9 +588,9 @@ int kvm_s390_set_clock(uint8_t *tod_high, uint64_t *tod_low)
  * @addr:      the logical start address in guest memory
  * @ar:        the access register number
  * @hostbuf:   buffer in host memory. NULL = do only checks w/o copying
- * @len:       length that should be transfered
+ * @len:       length that should be transferred
  * @is_write:  true = write, false = read
- * Returns:    0 on success, non-zero if an exception or error occured
+ * Returns:    0 on success, non-zero if an exception or error occurred
  *
  * Use KVM ioctl to read/write from/to guest memory. An access exception
  * is injected into the vCPU in case of translation errors.
@@ -1796,13 +1796,6 @@ static bool is_special_wait_psw(CPUState *cs)
     return cs->kvm_run->psw_addr == 0xfffUL;
 }
 
-static void guest_panicked(void)
-{
-    qapi_event_send_guest_panicked(GUEST_PANIC_ACTION_PAUSE,
-                                   &error_abort);
-    vm_stop(RUN_STATE_GUEST_PANICKED);
-}
-
 static void unmanageable_intercept(S390CPU *cpu, const char *str, int pswoffset)
 {
     CPUState *cs = CPU(cpu);
@@ -1811,7 +1804,7 @@ static void unmanageable_intercept(S390CPU *cpu, const char *str, int pswoffset)
                  str, cs->cpu_index, ldq_phys(cs->as, cpu->env.psa + pswoffset),
                  ldq_phys(cs->as, cpu->env.psa + pswoffset + 8));
     s390_cpu_halt(cpu);
-    guest_panicked();
+    qemu_system_guest_panicked();
 }
 
 static int handle_intercept(S390CPU *cpu)
@@ -1844,7 +1837,7 @@ static int handle_intercept(S390CPU *cpu)
                 if (is_special_wait_psw(cs)) {
                     qemu_system_shutdown_request();
                 } else {
-                    guest_panicked();
+                    qemu_system_guest_panicked();
                 }
             }
             r = EXCP_HALTED;

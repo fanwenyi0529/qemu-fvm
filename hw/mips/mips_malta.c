@@ -919,15 +919,6 @@ static void main_cpu_reset(void *opaque)
     }
 }
 
-static void cpu_request_exit(void *opaque, int irq, int level)
-{
-    CPUState *cpu = current_cpu;
-
-    if (cpu && level) {
-        cpu_exit(cpu);
-    }
-}
-
 static
 void mips_malta_init(MachineState *machine)
 {
@@ -953,7 +944,6 @@ void mips_malta_init(MachineState *machine)
     MIPSCPU *cpu;
     CPUMIPSState *env;
     qemu_irq *isa_irq;
-    qemu_irq *cpu_exit_irq;
     int piix4_devfn;
     I2CBus *smbus;
     int i;
@@ -1143,7 +1133,7 @@ void mips_malta_init(MachineState *machine)
      * regions are not executable.
      */
     memory_region_init_ram(bios_copy, NULL, "bios.1fc", BIOS_SIZE,
-                           &error_abort);
+                           &error_fatal);
     if (!rom_copy(memory_region_get_ram_ptr(bios_copy),
                   FLASH_ADDRESS, BIOS_SIZE)) {
         memcpy(memory_region_get_ram_ptr(bios_copy),
@@ -1188,8 +1178,7 @@ void mips_malta_init(MachineState *machine)
     smbus_eeprom_init(smbus, 8, smbus_eeprom_buf, smbus_eeprom_size);
     g_free(smbus_eeprom_buf);
     pit = pit_init(isa_bus, 0x40, 0, NULL);
-    cpu_exit_irq = qemu_allocate_irqs(cpu_request_exit, NULL, 1);
-    DMA_init(0, cpu_exit_irq);
+    DMA_init(0);
 
     /* Super I/O */
     isa_create_simple(isa_bus, "i8042");

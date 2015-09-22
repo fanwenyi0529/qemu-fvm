@@ -108,6 +108,11 @@
 
 #define NB_MMU_MODES 2
 
+typedef struct {
+    uint32_t hi;
+    uint32_t lo;
+} TLBSet;
+
 typedef struct CPUCRISState {
 	uint32_t regs[16];
 	/* P0 - P15 are referred to as special registers in the docs.  */
@@ -151,7 +156,7 @@ typedef struct CPUCRISState {
 	uint32_t sregs[4][16];
 
 	/* Linear feedback shift reg in the mmu. Used to provide pseudo
-	   randomness for the 'hint' the mmu gives to sw for chosing valid
+	   randomness for the 'hint' the mmu gives to sw for choosing valid
 	   sets on TLB refills.  */
 	uint32_t mmu_rand_lfsr;
 
@@ -161,11 +166,7 @@ typedef struct CPUCRISState {
 	 *
 	 * One for I and another for D.
 	 */
-	struct
-	{
-		uint32_t hi;
-		uint32_t lo;
-	} tlbsets[2][4][16];
+        TLBSet tlbsets[2][4][16];
 
 	CPU_COMMON
 
@@ -227,13 +228,11 @@ enum {
 #define cpu_gen_code cpu_cris_gen_code
 #define cpu_signal_handler cpu_cris_signal_handler
 
-#define CPU_SAVE_VERSION 1
-
 /* MMU modes definitions */
 #define MMU_MODE0_SUFFIX _kernel
 #define MMU_MODE1_SUFFIX _user
 #define MMU_USER_IDX 1
-static inline int cpu_mmu_index (CPUCRISState *env)
+static inline int cpu_mmu_index (CPUCRISState *env, bool ifetch)
 {
 	return !!(env->pregs[PR_CCS] & U_FLAG);
 }

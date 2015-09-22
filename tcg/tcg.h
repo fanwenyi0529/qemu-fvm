@@ -66,7 +66,8 @@ typedef uint64_t TCGRegSet;
 
 #if TCG_TARGET_REG_BITS == 32
 /* Turn some undef macros into false macros.  */
-#define TCG_TARGET_HAS_trunc_shr_i32    0
+#define TCG_TARGET_HAS_extrl_i64_i32    0
+#define TCG_TARGET_HAS_extrh_i64_i32    0
 #define TCG_TARGET_HAS_div_i64          0
 #define TCG_TARGET_HAS_rem_i64          0
 #define TCG_TARGET_HAS_div2_i64         0
@@ -594,6 +595,10 @@ void *tcg_malloc_internal(TCGContext *s, int size);
 void tcg_pool_reset(TCGContext *s);
 void tcg_pool_delete(TCGContext *s);
 
+void tb_lock(void);
+void tb_unlock(void);
+void tb_lock_reset(void);
+
 static inline void *tcg_malloc(int size)
 {
     TCGContext *s = &tcg_ctx;
@@ -985,25 +990,48 @@ void helper_be_stl_mmu(CPUArchState *env, target_ulong addr, uint32_t val,
 void helper_be_stq_mmu(CPUArchState *env, target_ulong addr, uint64_t val,
                        TCGMemOpIdx oi, uintptr_t retaddr);
 
+uint8_t helper_ret_ldb_cmmu(CPUArchState *env, target_ulong addr,
+                            TCGMemOpIdx oi, uintptr_t retaddr);
+uint16_t helper_le_ldw_cmmu(CPUArchState *env, target_ulong addr,
+                            TCGMemOpIdx oi, uintptr_t retaddr);
+uint32_t helper_le_ldl_cmmu(CPUArchState *env, target_ulong addr,
+                            TCGMemOpIdx oi, uintptr_t retaddr);
+uint64_t helper_le_ldq_cmmu(CPUArchState *env, target_ulong addr,
+                            TCGMemOpIdx oi, uintptr_t retaddr);
+uint16_t helper_be_ldw_cmmu(CPUArchState *env, target_ulong addr,
+                            TCGMemOpIdx oi, uintptr_t retaddr);
+uint32_t helper_be_ldl_cmmu(CPUArchState *env, target_ulong addr,
+                            TCGMemOpIdx oi, uintptr_t retaddr);
+uint64_t helper_be_ldq_cmmu(CPUArchState *env, target_ulong addr,
+                            TCGMemOpIdx oi, uintptr_t retaddr);
+
 /* Temporary aliases until backends are converted.  */
 #ifdef TARGET_WORDS_BIGENDIAN
 # define helper_ret_ldsw_mmu  helper_be_ldsw_mmu
 # define helper_ret_lduw_mmu  helper_be_lduw_mmu
 # define helper_ret_ldsl_mmu  helper_be_ldsl_mmu
 # define helper_ret_ldul_mmu  helper_be_ldul_mmu
+# define helper_ret_ldl_mmu   helper_be_ldul_mmu
 # define helper_ret_ldq_mmu   helper_be_ldq_mmu
 # define helper_ret_stw_mmu   helper_be_stw_mmu
 # define helper_ret_stl_mmu   helper_be_stl_mmu
 # define helper_ret_stq_mmu   helper_be_stq_mmu
+# define helper_ret_ldw_cmmu  helper_be_ldw_cmmu
+# define helper_ret_ldl_cmmu  helper_be_ldl_cmmu
+# define helper_ret_ldq_cmmu  helper_be_ldq_cmmu
 #else
 # define helper_ret_ldsw_mmu  helper_le_ldsw_mmu
 # define helper_ret_lduw_mmu  helper_le_lduw_mmu
 # define helper_ret_ldsl_mmu  helper_le_ldsl_mmu
 # define helper_ret_ldul_mmu  helper_le_ldul_mmu
+# define helper_ret_ldl_mmu   helper_le_ldul_mmu
 # define helper_ret_ldq_mmu   helper_le_ldq_mmu
 # define helper_ret_stw_mmu   helper_le_stw_mmu
 # define helper_ret_stl_mmu   helper_le_stl_mmu
 # define helper_ret_stq_mmu   helper_le_stq_mmu
+# define helper_ret_ldw_cmmu  helper_le_ldw_cmmu
+# define helper_ret_ldl_cmmu  helper_le_ldl_cmmu
+# define helper_ret_ldq_cmmu  helper_le_ldq_cmmu
 #endif
 
 #endif /* CONFIG_SOFTMMU */

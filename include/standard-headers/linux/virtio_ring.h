@@ -31,6 +31,7 @@
  * SUCH DAMAGE.
  *
  * Copyright Rusty Russell IBM Corporation 2007. */
+#include <stdint.h>
 #include "standard-headers/linux/types.h"
 #include "standard-headers/linux/virtio_types.h"
 

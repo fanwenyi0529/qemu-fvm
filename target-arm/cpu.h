@@ -56,6 +56,7 @@
 #define EXCP_SMC            13   /* Secure Monitor Call */
 #define EXCP_VIRQ           14
 #define EXCP_VFIQ           15
+#define EXCP_SEMIHOST       16   /* semihosting call (A64 only) */
 
 #define ARMV7M_EXCP_RESET   1
 #define ARMV7M_EXCP_NMI     2
@@ -113,7 +114,9 @@ typedef struct ARMGenericTimer {
 
 #define GTIMER_PHYS 0
 #define GTIMER_VIRT 1
-#define NUM_GTIMERS 2
+#define GTIMER_HYP  2
+#define GTIMER_SEC  3
+#define NUM_GTIMERS 4
 
 typedef struct {
     uint64_t raw_tcr;
@@ -170,7 +173,7 @@ typedef struct CPUARMState {
     uint32_t GE; /* cpsr[19:16] */
     uint32_t thumb; /* cpsr[5]. 0 = arm mode, 1 = thumb mode. */
     uint32_t condexec_bits; /* IT bits.  cpsr[15:10,26:25].  */
-    uint64_t daif; /* exception masks, in the bits they are in in PSTATE */
+    uint64_t daif; /* exception masks, in the bits they are in PSTATE */
 
     uint64_t elr_el[4]; /* AArch64 exception link regs  */
     uint64_t sp_el[4]; /* AArch64 banked stack pointers */
@@ -219,10 +222,12 @@ typedef struct CPUARMState {
             };
             uint64_t ttbr1_el[4];
         };
+        uint64_t vttbr_el2; /* Virtualization Translation Table Base.  */
         /* MMU translation table base control. */
         TCR tcr_el[4];
-        uint32_t c2_data; /* MPU data cachable bits.  */
-        uint32_t c2_insn; /* MPU instruction cachable bits.  */
+        TCR vtcr_el2; /* Virtualization Translation Control.  */
+        uint32_t c2_data; /* MPU data cacheable bits.  */
+        uint32_t c2_insn; /* MPU instruction cacheable bits.  */
         union { /* MMU domain access control register
                  * MPU write buffer control.
                  */
@@ -358,6 +363,8 @@ typedef struct CPUARMState {
         };
         uint64_t c14_cntfrq; /* Counter Frequency register */
         uint64_t c14_cntkctl; /* Timer Control register */
+        uint32_t cnthctl_el2; /* Counter/Timer Hyp Control register */
+        uint64_t cntvoff_el2; /* Counter Virtual Offset register */
         ARMGenericTimer c14_timer[NUM_GTIMERS];
         uint32_t c15_cpar; /* XScale Coprocessor Access Register */
         uint32_t c15_ticonfig; /* TI925T configuration byte.  */
@@ -378,6 +385,8 @@ typedef struct CPUARMState {
          */
         uint64_t c15_ccnt;
         uint64_t pmccfiltr_el0; /* Performance Monitor Filter Register */
+        uint64_t vpidr_el2; /* Virtualization Processor ID Register */
+        uint64_t vmpidr_el2; /* Virtualization Multiprocessor ID Register */
     } cp15;
 
     struct {
@@ -500,7 +509,7 @@ typedef struct CPUARMState {
 
 ARMCPU *cpu_arm_init(const char *cpu_model);
 int cpu_arm_exec(CPUState *cpu);
-uint32_t do_arm_semihosting(CPUARMState *env);
+target_ulong do_arm_semihosting(CPUARMState *env);
 void aarch64_sync_32_to_64(CPUARMState *env);
 void aarch64_sync_64_to_32(CPUARMState *env);
 
@@ -1286,6 +1295,9 @@ typedef enum CPAccessResult {
     /* As CP_ACCESS_TRAP, but for traps directly to EL2 or EL3 */
     CP_ACCESS_TRAP_EL2 = 3,
     CP_ACCESS_TRAP_EL3 = 4,
+    /* As CP_ACCESS_UNCATEGORIZED, but for traps directly to EL2 or EL3 */
+    CP_ACCESS_TRAP_UNCATEGORIZED_EL2 = 5,
+    CP_ACCESS_TRAP_UNCATEGORIZED_EL3 = 6,
 } CPAccessResult;
 
 /* Access functions for coprocessor registers. These cannot fail and
@@ -1451,6 +1463,9 @@ static inline bool cp_access_ok(int current_el,
     return (ri->access >> ((current_el * 2) + isread)) & 1;
 }
 
+/* Raw read of a coprocessor register (as needed for migration, etc) */
+uint64_t read_raw_cp_reg(CPUARMState *env, const ARMCPRegInfo *ri);
+
 /**
  * write_list_to_cpustate
  * @cpu: ARMCPU
@@ -1483,7 +1498,7 @@ bool write_list_to_cpustate(ARMCPU *cpu);
  */
 bool write_cpustate_to_list(ARMCPU *cpu);
 
-/* Does the core conform to the the "MicroController" profile. e.g. Cortex-M3.
+/* Does the core conform to the "MicroController" profile. e.g. Cortex-M3.
    Note the M in older cores (eg. ARM7TDMI) stands for Multiply. These are
    conventional cores (ie. Application or Realtime profile).  */
 
@@ -1515,8 +1530,8 @@ static inline bool arm_excp_unmasked(CPUState *cs, unsigned int excp_idx,
     CPUARMState *env = cs->env_ptr;
     unsigned int cur_el = arm_current_el(env);
     bool secure = arm_is_secure(env);
-    uint32_t scr;
-    uint32_t hcr;
+    bool scr;
+    bool hcr;
     bool pstate_unmasked;
     int8_t unmasked = 0;
 
@@ -1543,7 +1558,7 @@ static inline bool arm_excp_unmasked(CPUState *cs, unsigned int excp_idx,
          * set then FIQs can be masked by CPSR.F when non-secure but only
          * when FIQs are only routed to EL3.
          */
-        scr &= !((env->cp15.scr_el3 & SCR_FW) && !hcr);
+        scr = scr && !((env->cp15.scr_el3 & SCR_FW) && !hcr);
         pstate_unmasked = !(env->daif & PSTATE_F);
         break;
 
@@ -1673,7 +1688,7 @@ static inline int arm_mmu_idx_to_el(ARMMMUIdx mmu_idx)
 }
 
 /* Determine the current mmu_idx to use for normal loads/stores */
-static inline int cpu_mmu_index(CPUARMState *env)
+static inline int cpu_mmu_index(CPUARMState *env, bool ifetch)
 {
     int el = arm_current_el(env);
 
@@ -1906,7 +1921,7 @@ static inline void cpu_get_tb_cpu_state(CPUARMState *env, target_ulong *pc,
                    << ARM_TBFLAG_XSCALE_CPAR_SHIFT);
     }
 
-    *flags |= (cpu_mmu_index(env) << ARM_TBFLAG_MMUIDX_SHIFT);
+    *flags |= (cpu_mmu_index(env, false) << ARM_TBFLAG_MMUIDX_SHIFT);
     /* The SS_ACTIVE and PSTATE_SS bits correspond to the state machine
      * states defined in the ARM ARM for software singlestep:
      *  SS_ACTIVE   PSTATE.SS   State

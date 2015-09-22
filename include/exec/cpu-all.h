@@ -160,18 +160,11 @@ static inline void tswap64s(uint64_t *s)
 /* On some host systems the guest address space is reserved on the host.
  * This allows the guest address space to be offset to a convenient location.
  */
-#if defined(CONFIG_USE_GUEST_BASE)
 extern uintptr_t guest_base;
 extern int have_guest_base;
 extern uintptr_t reserved_va;
-#define GUEST_BASE guest_base
-#define RESERVED_VA reserved_va
-#else
-#define GUEST_BASE 0ul
-#define RESERVED_VA 0ul
-#endif
 
-#define GUEST_ADDR_MAX (RESERVED_VA ? RESERVED_VA : \
+#define GUEST_ADDR_MAX (reserved_va ? reserved_va : \
                                     (1ul << TARGET_VIRT_ADDR_SPACE_BITS) - 1)
 #endif
 
@@ -273,44 +266,6 @@ CPUArchState *cpu_copy(CPUArchState *env);
 
 #if !defined(CONFIG_USER_ONLY)
 
-/* memory API */
-
-typedef struct RAMBlock RAMBlock;
-
-struct RAMBlock {
-    struct rcu_head rcu;
-    struct MemoryRegion *mr;
-    uint8_t *host;
-    ram_addr_t offset;
-    ram_addr_t used_length;
-    ram_addr_t max_length;
-    void (*resized)(const char*, uint64_t length, void *host);
-    uint32_t flags;
-    /* Protected by iothread lock.  */
-    char idstr[256];
-    /* RCU-enabled, writes protected by the ramlist lock */
-    QLIST_ENTRY(RAMBlock) next;
-    int fd;
-};
-
-static inline void *ramblock_ptr(RAMBlock *block, ram_addr_t offset)
-{
-    assert(offset < block->used_length);
-    assert(block->host);
-    return (char *)block->host + offset;
-}
-
-typedef struct RAMList {
-    QemuMutex mutex;
-    /* Protected by the iothread lock.  */
-    unsigned long *dirty_memory[DIRTY_MEMORY_NUM];
-    RAMBlock *mru_block;
-    /* RCU-enabled, writes protected by the ramlist lock. */
-    QLIST_HEAD(, RAMBlock) blocks;
-    uint32_t version;
-} RAMList;
-extern RAMList ram_list;
-
 /* Flags stored in the low bits of the TLB virtual address.  These are
    defined so that fast path ram access is all zeros.  */
 /* Zero if TLB entry is valid.  */
@@ -323,9 +278,6 @@ extern RAMList ram_list;
 
 void dump_exec_info(FILE *f, fprintf_function cpu_fprintf);
 void dump_opcount_info(FILE *f, fprintf_function cpu_fprintf);
-ram_addr_t last_ram_offset(void);
-void qemu_mutex_lock_ramlist(void);
-void qemu_mutex_unlock_ramlist(void);
 #endif /* !CONFIG_USER_ONLY */
 
 int cpu_memory_rw_debug(CPUState *cpu, target_ulong addr,

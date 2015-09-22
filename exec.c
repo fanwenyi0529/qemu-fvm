@@ -49,7 +49,6 @@
 #include "exec/cpu-all.h"
 #include "qemu/rcu_queue.h"
 #include "qemu/main-loop.h"
-#include "exec/cputlb.h"
 #include "translate-all.h"
 
 #include "exec/memory-internal.h"
@@ -90,7 +89,7 @@ static MemoryRegion io_mem_unassigned;
 struct CPUTailQ cpus = QTAILQ_HEAD_INITIALIZER(cpus);
 /* current CPU in the current thread. It is only valid inside
    cpu_exec() */
-DEFINE_TLS(CPUState *, current_cpu);
+__thread CPUState *current_cpu;
 /* 0 = Do not count executed instructions.
    1 = Precise instruction counting.
    2 = Adaptive rate instruction counting.  */
@@ -478,6 +477,24 @@ static const VMStateDescription vmstate_cpu_common_exception_index = {
     }
 };
 
+static bool cpu_common_crash_occurred_needed(void *opaque)
+{
+    CPUState *cpu = opaque;
+
+    return cpu->crash_occurred;
+}
+
+static const VMStateDescription vmstate_cpu_common_crash_occurred = {
+    .name = "cpu_common/crash_occurred",
+    .version_id = 1,
+    .minimum_version_id = 1,
+    .needed = cpu_common_crash_occurred_needed,
+    .fields = (VMStateField[]) {
+        VMSTATE_BOOL(crash_occurred, CPUState),
+        VMSTATE_END_OF_LIST()
+    }
+};
+
 const VMStateDescription vmstate_cpu_common = {
     .name = "cpu_common",
     .version_id = 1,
@@ -491,6 +508,7 @@ const VMStateDescription vmstate_cpu_common = {
     },
     .subsections = (const VMStateDescription*[]) {
         &vmstate_cpu_common_exception_index,
+        &vmstate_cpu_common_crash_occurred,
         NULL
     }
 };
@@ -900,6 +918,7 @@ found:
 
 static void tlb_reset_dirty_range_all(ram_addr_t start, ram_addr_t length)
 {
+    CPUState *cpu;
     ram_addr_t start1;
     RAMBlock *block;
     ram_addr_t end;
@@ -911,7 +930,9 @@ static void tlb_reset_dirty_range_all(ram_addr_t start, ram_addr_t length)
     block = qemu_get_ram_block(start);
     assert(block == qemu_get_ram_block(end - 1));
     start1 = (uintptr_t)ramblock_ptr(block, start - block->offset);
-    cpu_tlb_reset_dirty_all(start1, length);
+    CPU_FOREACH(cpu) {
+        tlb_reset_dirty(cpu, start1, length);
+    }
     rcu_read_unlock();
 }
 
@@ -1216,7 +1237,7 @@ static void *file_ram_alloc(RAMBlock *block,
     unlink(filename);
     g_free(filename);
 
-    memory = (memory+hpagesize-1) & ~(hpagesize-1);
+    memory = ROUND_UP(memory, hpagesize);
 
     /*
      * ftruncate is not supported by hugetlbfs in older
@@ -1921,8 +1942,7 @@ static void notdirty_mem_write(void *opaque, hwaddr ram_addr,
     /* we remove the notdirty callback only if the code has been
        flushed */
     if (!cpu_physical_memory_is_clean(ram_addr)) {
-        CPUArchState *env = current_cpu->env_ptr;
-        tlb_set_dirty(env, current_cpu->mem_io_vaddr);
+        tlb_set_dirty(current_cpu, current_cpu->mem_io_vaddr);
     }
 }
 
@@ -2395,9 +2415,7 @@ static int memory_access_size(MemoryRegion *mr, unsigned l, hwaddr addr)
     if (l > access_size_max) {
         l = access_size_max;
     }
-    if (l & (l - 1)) {
-        l = 1 << (qemu_fls(l) - 1);
-    }
+    l = pow2floor(l);
 
     return l;
 }

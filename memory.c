@@ -1231,7 +1231,7 @@ void memory_region_init_io(MemoryRegion *mr,
                            uint64_t size)
 {
     memory_region_init(mr, owner, name, size);
-    mr->ops = ops;
+    mr->ops = ops ? ops : &unassigned_mem_ops;
     mr->opaque = opaque;
     mr->terminates = true;
 }
@@ -1300,7 +1300,7 @@ void memory_region_init_ram_ptr(MemoryRegion *mr,
 
     /* qemu_ram_alloc_from_ptr cannot fail with ptr != NULL.  */
     assert(ptr != NULL);
-    mr->ram_addr = qemu_ram_alloc_from_ptr(size, ptr, mr, &error_abort);
+    mr->ram_addr = qemu_ram_alloc_from_ptr(size, ptr, mr, &error_fatal);
 }
 
 void memory_region_set_skip_dump(MemoryRegion *mr)
@@ -1347,14 +1347,6 @@ void memory_region_init_iommu(MemoryRegion *mr,
     mr->iommu_ops = ops,
     mr->terminates = true;  /* then re-forwards */
     notifier_list_init(&mr->iommu_notify);
-}
-
-void memory_region_init_reservation(MemoryRegion *mr,
-                                    Object *owner,
-                                    const char *name,
-                                    uint64_t size)
-{
-    memory_region_init_io(mr, owner, &unassigned_mem_ops, mr, name, size);
 }
 
 static void memory_region_finalize(Object *obj)

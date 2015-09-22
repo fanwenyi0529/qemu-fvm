@@ -102,7 +102,7 @@ static void usage(const char *name)
 "      --aio=MODE            set AIO mode (native or threads)\n"
 #endif
 "      --discard=MODE        set discard mode (ignore, unmap)\n"
-"      --detect-zeroes=MODE  set detect-zeroes mode (off, on, discard)\n"
+"      --detect-zeroes=MODE  set detect-zeroes mode (off, on, unmap)\n"
 "\n"
 "Report bugs to <qemu-devel@nongnu.org>\n"
     , name, NBD_DEFAULT_PORT, "DEVICE");
@@ -362,7 +362,6 @@ static void nbd_client_closed(NBDClient *client)
         state = TERMINATE;
     }
     nbd_update_server_fd_handler(server_fd);
-    qemu_notify_event();
     nbd_client_put(client);
 }
 

@@ -913,7 +913,7 @@ static void spitz_common_init(MachineState *machine,
 
     sl_flash_register(mpu, (model == spitz) ? FLASH_128M : FLASH_1024M);
 
-    memory_region_init_ram(rom, NULL, "spitz.rom", SPITZ_ROM, &error_abort);
+    memory_region_init_ram(rom, NULL, "spitz.rom", SPITZ_ROM, &error_fatal);
     vmstate_register_ram_global(rom);
     memory_region_set_readonly(rom, true);
     memory_region_add_subregion(address_space_mem, 0, rom);
@@ -1060,10 +1060,6 @@ static VMStateDescription vmstate_spitz_kbd = {
     },
 };
 
-static Property spitz_keyboard_properties[] = {
-    DEFINE_PROP_END_OF_LIST(),
-};
-
 static void spitz_keyboard_class_init(ObjectClass *klass, void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(klass);
@@ -1071,7 +1067,6 @@ static void spitz_keyboard_class_init(ObjectClass *klass, void *data)
 
     k->init = spitz_keyboard_init;
     dc->vmsd = &vmstate_spitz_kbd;
-    dc->props = spitz_keyboard_properties;
 }
 
 static const TypeInfo spitz_keyboard_info = {

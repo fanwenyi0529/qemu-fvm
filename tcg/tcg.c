@@ -113,17 +113,6 @@ static void tcg_out_tb_init(TCGContext *s);
 static void tcg_out_tb_finalize(TCGContext *s);
 
 
-/* Forward declarations for functions which may be used in tcg-target.c. */
-static char *tcg_get_arg_str_idx(TCGContext *s, char *buf, int buf_size,
-                                 int idx);
-
-TCGOpDef tcg_op_defs[] = {
-#define DEF(s, oargs, iargs, cargs, flags) { #s, oargs, iargs, cargs, iargs + oargs + cargs, flags },
-#include "tcg-opc.h"
-#undef DEF
-};
-const size_t tcg_op_defs_max = ARRAY_SIZE(tcg_op_defs);
-
 static TCGRegSet tcg_target_available_regs[2];
 static TCGRegSet tcg_target_call_clobber_regs;
 
@@ -1244,7 +1233,7 @@ void tcg_add_target_add_op_defs(const TCGTargetOpDef *tdefs)
 
 #if defined(CONFIG_DEBUG_TCG)
     i = 0;
-    for (op = 0; op < ARRAY_SIZE(tcg_op_defs); op++) {
+    for (op = 0; op < tcg_op_defs_max; op++) {
         const TCGOpDef *def = &tcg_op_defs[op];
         if (def->flags & TCG_OPF_NOT_PRESENT) {
             /* Wrong entry in op definitions? */
@@ -1400,7 +1389,7 @@ static void tcg_liveness_analysis(TCGContext *s)
                             }
                         }
                     }
-                    /* input arguments are live for preceeding opcodes */
+                    /* input arguments are live for preceding opcodes */
                     for (i = nb_oargs; i < nb_oargs + nb_iargs; i++) {
                         arg = args[i];
                         dead_temps[arg] = 0;
@@ -1546,7 +1535,7 @@ static void tcg_liveness_analysis(TCGContext *s)
                         dead_args |= (1 << i);
                     }
                 }
-                /* input arguments are live for preceeding opcodes */
+                /* input arguments are live for preceding opcodes */
                 for (i = nb_oargs; i < nb_oargs + nb_iargs; i++) {
                     arg = args[i];
                     dead_temps[arg] = 0;

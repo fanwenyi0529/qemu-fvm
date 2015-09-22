@@ -1,5 +1,7 @@
 export SRC_PATH
 
+qapi-py = $(SRC_PATH)/scripts/qapi.py $(SRC_PATH)/scripts/ordereddict.py
+
 # Get the list of all supported sysemu targets
 SYSEMU_TARGET_LIST := $(subst -softmmu.mak,,$(notdir \
    $(wildcard $(SRC_PATH)/default-configs/*-softmmu.mak)))
@@ -76,6 +78,8 @@ check-unit-y += tests/test-write-threshold$(EXESUF)
 gcov-files-test-write-threshold-y = block/write-threshold.c
 check-unit-$(CONFIG_GNUTLS_HASH) += tests/test-crypto-hash$(EXESUF)
 check-unit-y += tests/test-crypto-cipher$(EXESUF)
+check-unit-$(CONFIG_GNUTLS) += tests/test-crypto-tlscredsx509$(EXESUF)
+check-unit-$(CONFIG_GNUTLS) += tests/test-crypto-tlssession$(EXESUF)
 
 check-block-$(CONFIG_POSIX) += tests/qemu-iotests-quick.sh
 
@@ -201,6 +205,7 @@ check-qtest-sparc64-y = tests/endianness-test$(EXESUF)
 gcov-files-sparc-y += hw/timer/m48t59.c
 gcov-files-sparc64-y += hw/timer/m48t59.c
 check-qtest-arm-y = tests/tmp105-test$(EXESUF)
+check-qtest-arm-y = tests/ds1338-test$(EXESUF)
 gcov-files-arm-y += hw/misc/tmp105.c
 check-qtest-arm-y += tests/virtio-blk-test$(EXESUF)
 gcov-files-arm-y += arm-softmmu/hw/block/virtio-blk.c
@@ -220,7 +225,8 @@ check-qapi-schema-y := $(addprefix tests/qapi-schema/, \
 	comments.json empty.json enum-empty.json enum-missing-data.json \
 	enum-wrong-data.json enum-int-member.json enum-dict-member.json \
 	enum-clash-member.json enum-max-member.json enum-union-clash.json \
-	enum-bad-name.json funny-char.json indented-expr.json \
+	enum-bad-name.json enum-bad-prefix.json \
+	funny-char.json indented-expr.json \
 	missing-type.json bad-ident.json ident-with-escape.json \
 	escape-outside-string.json unknown-escape.json \
 	escape-too-short.json escape-too-big.json unicode-str.json \
@@ -229,13 +235,17 @@ check-qapi-schema-y := $(addprefix tests/qapi-schema/, \
 	redefined-type.json redefined-command.json redefined-builtin.json \
 	redefined-event.json command-int.json bad-data.json event-max.json \
 	type-bypass.json type-bypass-no-gen.json type-bypass-bad-gen.json \
-	data-array-empty.json data-array-unknown.json data-int.json \
-	data-unknown.json data-member-unknown.json data-member-array.json \
-	data-member-array-bad.json returns-array-bad.json returns-int.json \
+	args-invalid.json \
+	args-array-empty.json args-array-unknown.json args-int.json \
+	args-unknown.json args-member-unknown.json args-member-array.json \
+	args-member-array-bad.json args-alternate.json args-union.json \
+	returns-array-bad.json returns-int.json returns-dict.json \
 	returns-unknown.json returns-alternate.json returns-whitelist.json \
 	missing-colon.json missing-comma-list.json missing-comma-object.json \
-	nested-struct-data.json nested-struct-returns.json non-objects.json \
+	struct-data-invalid.json struct-member-invalid.json \
+	nested-struct-data.json non-objects.json \
 	qapi-schema-test.json quoted-structural-chars.json \
+	leading-comma-list.json leading-comma-object.json \
 	trailing-comma-list.json trailing-comma-object.json \
 	unclosed-list.json unclosed-object.json unclosed-string.json \
 	duplicate-key.json union-invalid-base.json union-bad-branch.json \
@@ -270,47 +280,50 @@ test-obj-y = tests/check-qint.o tests/check-qstring.o tests/check-qdict.o \
 	tests/test-opts-visitor.o tests/test-qmp-event.o \
 	tests/rcutorture.o tests/test-rcu-list.o
 
-test-qapi-obj-y = tests/test-qapi-visit.o tests/test-qapi-types.o \
-		  tests/test-qapi-event.o
-
 $(test-obj-y): QEMU_INCLUDES += -Itests
 QEMU_CFLAGS += -I$(SRC_PATH)/tests
-qom-core-obj = qom/object.o qom/qom-qobject.o qom/container.o qom/object_interfaces.o
 
-tests/check-qint$(EXESUF): tests/check-qint.o libqemuutil.a
-tests/check-qstring$(EXESUF): tests/check-qstring.o libqemuutil.a
-tests/check-qdict$(EXESUF): tests/check-qdict.o libqemuutil.a
-tests/check-qlist$(EXESUF): tests/check-qlist.o libqemuutil.a
-tests/check-qfloat$(EXESUF): tests/check-qfloat.o libqemuutil.a
-tests/check-qjson$(EXESUF): tests/check-qjson.o libqemuutil.a libqemustub.a
-tests/check-qom-interface$(EXESUF): tests/check-qom-interface.o $(qom-core-obj) libqemuutil.a libqemustub.a
-tests/check-qom-proplist$(EXESUF): tests/check-qom-proplist.o $(qom-core-obj) libqemuutil.a libqemustub.a
-tests/test-coroutine$(EXESUF): tests/test-coroutine.o $(block-obj-y) libqemuutil.a libqemustub.a
-tests/test-aio$(EXESUF): tests/test-aio.o $(block-obj-y) libqemuutil.a libqemustub.a
-tests/test-rfifolock$(EXESUF): tests/test-rfifolock.o libqemuutil.a libqemustub.a
-tests/test-throttle$(EXESUF): tests/test-throttle.o $(block-obj-y) libqemuutil.a libqemustub.a
-tests/test-thread-pool$(EXESUF): tests/test-thread-pool.o $(block-obj-y) libqemuutil.a libqemustub.a
-tests/test-iov$(EXESUF): tests/test-iov.o libqemuutil.a
-tests/test-hbitmap$(EXESUF): tests/test-hbitmap.o libqemuutil.a libqemustub.a
+
+# Deps that are common to various different sets of tests below
+test-util-obj-y = libqemuutil.a libqemustub.a
+test-qom-obj-y = $(qom-obj-y) $(test-util-obj-y)
+test-qapi-obj-y = tests/test-qapi-visit.o tests/test-qapi-types.o \
+	tests/test-qapi-event.o \
+	$(test-qom-obj-y)
+test-crypto-obj-y = $(crypto-obj-y) $(test-qom-obj-y)
+test-block-obj-y = $(block-obj-y) $(test-crypto-obj-y)
+
+tests/check-qint$(EXESUF): tests/check-qint.o $(test-util-obj-y)
+tests/check-qstring$(EXESUF): tests/check-qstring.o $(test-util-obj-y)
+tests/check-qdict$(EXESUF): tests/check-qdict.o $(test-util-obj-y)
+tests/check-qlist$(EXESUF): tests/check-qlist.o $(test-util-obj-y)
+tests/check-qfloat$(EXESUF): tests/check-qfloat.o $(test-util-obj-y)
+tests/check-qjson$(EXESUF): tests/check-qjson.o $(test-util-obj-y)
+tests/check-qom-interface$(EXESUF): tests/check-qom-interface.o $(test-qom-obj-y)
+tests/check-qom-proplist$(EXESUF): tests/check-qom-proplist.o $(test-qom-obj-y)
+tests/test-coroutine$(EXESUF): tests/test-coroutine.o $(test-block-obj-y)
+tests/test-aio$(EXESUF): tests/test-aio.o $(test-block-obj-y)
+tests/test-rfifolock$(EXESUF): tests/test-rfifolock.o $(test-util-obj-y)
+tests/test-throttle$(EXESUF): tests/test-throttle.o $(test-block-obj-y)
+tests/test-thread-pool$(EXESUF): tests/test-thread-pool.o $(test-block-obj-y)
+tests/test-iov$(EXESUF): tests/test-iov.o $(test-util-obj-y)
+tests/test-hbitmap$(EXESUF): tests/test-hbitmap.o $(test-util-obj-y)
 tests/test-x86-cpuid$(EXESUF): tests/test-x86-cpuid.o
-tests/test-xbzrle$(EXESUF): tests/test-xbzrle.o migration/xbzrle.o page_cache.o libqemuutil.a
+tests/test-xbzrle$(EXESUF): tests/test-xbzrle.o migration/xbzrle.o page_cache.o $(test-util-obj-y)
 tests/test-cutils$(EXESUF): tests/test-cutils.o util/cutils.o
 tests/test-int128$(EXESUF): tests/test-int128.o
-tests/rcutorture$(EXESUF): tests/rcutorture.o libqemuutil.a libqemustub.a
-tests/test-rcu-list$(EXESUF): tests/test-rcu-list.o libqemuutil.a libqemustub.a
+tests/rcutorture$(EXESUF): tests/rcutorture.o $(test-util-obj-y)
+tests/test-rcu-list$(EXESUF): tests/test-rcu-list.o $(test-util-obj-y)
 
 tests/test-qdev-global-props$(EXESUF): tests/test-qdev-global-props.o \
 	hw/core/qdev.o hw/core/qdev-properties.o hw/core/hotplug.o\
 	hw/core/irq.o \
 	hw/core/fw-path-provider.o \
-	$(qom-core-obj) \
-	$(test-qapi-obj-y) \
-	libqemuutil.a libqemustub.a
+	$(test-qapi-obj-y)
 tests/test-vmstate$(EXESUF): tests/test-vmstate.o \
 	migration/vmstate.o migration/qemu-file.o migration/qemu-file-buf.o \
         migration/qemu-file-unix.o qjson.o \
-	$(qom-core-obj) \
-	libqemuutil.a libqemustub.a
+	$(test-qom-obj-y)
 
 tests/test-qapi-types.c tests/test-qapi-types.h :\
 $(SRC_PATH)/tests/qapi-schema/qapi-schema-test.json $(SRC_PATH)/scripts/qapi-types.py $(qapi-py)
@@ -333,20 +346,24 @@ $(SRC_PATH)/tests/qapi-schema/qapi-schema-test.json $(SRC_PATH)/scripts/qapi-eve
 		$(gen-out-type) -o tests -p "test-" $<, \
 		"  GEN   $@")
 
-tests/test-string-output-visitor$(EXESUF): tests/test-string-output-visitor.o $(test-qapi-obj-y) libqemuutil.a libqemustub.a
-tests/test-string-input-visitor$(EXESUF): tests/test-string-input-visitor.o $(test-qapi-obj-y) libqemuutil.a libqemustub.a
-tests/test-qmp-event$(EXESUF): tests/test-qmp-event.o $(test-qapi-obj-y) libqemuutil.a libqemustub.a
-tests/test-qmp-output-visitor$(EXESUF): tests/test-qmp-output-visitor.o $(test-qapi-obj-y) libqemuutil.a libqemustub.a
-tests/test-qmp-input-visitor$(EXESUF): tests/test-qmp-input-visitor.o $(test-qapi-obj-y) libqemuutil.a libqemustub.a
-tests/test-qmp-input-strict$(EXESUF): tests/test-qmp-input-strict.o $(test-qapi-obj-y) libqemuutil.a libqemustub.a
-tests/test-qmp-commands$(EXESUF): tests/test-qmp-commands.o tests/test-qmp-marshal.o $(test-qapi-obj-y) libqemuutil.a libqemustub.a
-tests/test-visitor-serialization$(EXESUF): tests/test-visitor-serialization.o $(test-qapi-obj-y) libqemuutil.a libqemustub.a
-tests/test-opts-visitor$(EXESUF): tests/test-opts-visitor.o $(test-qapi-obj-y) libqemuutil.a libqemustub.a
+tests/test-string-output-visitor$(EXESUF): tests/test-string-output-visitor.o $(test-qapi-obj-y)
+tests/test-string-input-visitor$(EXESUF): tests/test-string-input-visitor.o $(test-qapi-obj-y)
+tests/test-qmp-event$(EXESUF): tests/test-qmp-event.o $(test-qapi-obj-y)
+tests/test-qmp-output-visitor$(EXESUF): tests/test-qmp-output-visitor.o $(test-qapi-obj-y)
+tests/test-qmp-input-visitor$(EXESUF): tests/test-qmp-input-visitor.o $(test-qapi-obj-y)
+tests/test-qmp-input-strict$(EXESUF): tests/test-qmp-input-strict.o $(test-qapi-obj-y)
+tests/test-qmp-commands$(EXESUF): tests/test-qmp-commands.o tests/test-qmp-marshal.o $(test-qapi-obj-y)
+tests/test-visitor-serialization$(EXESUF): tests/test-visitor-serialization.o $(test-qapi-obj-y)
+tests/test-opts-visitor$(EXESUF): tests/test-opts-visitor.o $(test-qapi-obj-y)
 
-tests/test-mul64$(EXESUF): tests/test-mul64.o libqemuutil.a
-tests/test-bitops$(EXESUF): tests/test-bitops.o libqemuutil.a
-tests/test-crypto-hash$(EXESUF): tests/test-crypto-hash.o libqemuutil.a libqemustub.a
-tests/test-crypto-cipher$(EXESUF): tests/test-crypto-cipher.o libqemuutil.a libqemustub.a
+tests/test-mul64$(EXESUF): tests/test-mul64.o $(test-util-obj-y)
+tests/test-bitops$(EXESUF): tests/test-bitops.o $(test-util-obj-y)
+tests/test-crypto-hash$(EXESUF): tests/test-crypto-hash.o $(test-crypto-obj-y)
+tests/test-crypto-cipher$(EXESUF): tests/test-crypto-cipher.o $(test-crypto-obj-y)
+tests/test-crypto-tlscredsx509$(EXESUF): tests/test-crypto-tlscredsx509.o \
+	tests/crypto-tls-x509-helpers.o tests/pkix_asn1_tab.o $(test-crypto-obj-y)
+tests/test-crypto-tlssession$(EXESUF): tests/test-crypto-tlssession.o \
+	tests/crypto-tls-x509-helpers.o tests/pkix_asn1_tab.o $(test-crypto-obj-y)
 
 libqos-obj-y = tests/libqos/pci.o tests/libqos/fw_cfg.o tests/libqos/malloc.o
 libqos-obj-y += tests/libqos/i2c.o tests/libqos/libqos.o
@@ -354,6 +371,7 @@ libqos-pc-obj-y = $(libqos-obj-y) tests/libqos/pci-pc.o
 libqos-pc-obj-y += tests/libqos/malloc-pc.o tests/libqos/libqos-pc.o
 libqos-pc-obj-y += tests/libqos/ahci.o
 libqos-omap-obj-y = $(libqos-obj-y) tests/libqos/i2c-omap.o
+libqos-imx-obj-y = $(libqos-obj-y) tests/libqos/i2c-imx.o
 libqos-usb-obj-y = $(libqos-pc-obj-y) tests/libqos/usb.o
 libqos-virtio-obj-y = $(libqos-pc-obj-y) tests/libqos/virtio.o tests/libqos/virtio-pci.o tests/libqos/virtio-mmio.o tests/libqos/malloc-generic.o
 
@@ -368,6 +386,7 @@ tests/hd-geo-test$(EXESUF): tests/hd-geo-test.o
 tests/boot-order-test$(EXESUF): tests/boot-order-test.o $(libqos-obj-y)
 tests/bios-tables-test$(EXESUF): tests/bios-tables-test.o $(libqos-obj-y)
 tests/tmp105-test$(EXESUF): tests/tmp105-test.o $(libqos-omap-obj-y)
+tests/ds1338-test$(EXESUF): tests/ds1338-test.o $(libqos-imx-obj-y)
 tests/i440fx-test$(EXESUF): tests/i440fx-test.o $(libqos-pc-obj-y)
 tests/q35-test$(EXESUF): tests/q35-test.o $(libqos-pc-obj-y)
 tests/fw_cfg-test$(EXESUF): tests/fw_cfg-test.o $(libqos-pc-obj-y)
@@ -381,7 +400,7 @@ tests/wdt_ib700-test$(EXESUF): tests/wdt_ib700-test.o
 tests/tco-test$(EXESUF): tests/tco-test.o $(libqos-pc-obj-y)
 tests/virtio-balloon-test$(EXESUF): tests/virtio-balloon-test.o
 tests/virtio-blk-test$(EXESUF): tests/virtio-blk-test.o $(libqos-virtio-obj-y)
-tests/virtio-net-test$(EXESUF): tests/virtio-net-test.o $(libqos-pc-obj-y)
+tests/virtio-net-test$(EXESUF): tests/virtio-net-test.o $(libqos-pc-obj-y) $(libqos-virtio-obj-y)
 tests/virtio-rng-test$(EXESUF): tests/virtio-rng-test.o $(libqos-pc-obj-y)
 tests/virtio-scsi-test$(EXESUF): tests/virtio-scsi-test.o $(libqos-virtio-obj-y)
 tests/virtio-9p-test$(EXESUF): tests/virtio-9p-test.o
@@ -407,12 +426,14 @@ tests/usb-hcd-xhci-test$(EXESUF): tests/usb-hcd-xhci-test.o $(libqos-usb-obj-y)
 tests/pc-cpu-test$(EXESUF): tests/pc-cpu-test.o
 tests/vhost-user-test$(EXESUF): tests/vhost-user-test.o qemu-char.o qemu-timer.o $(qtest-obj-y)
 tests/qemu-iotests/socket_scm_helper$(EXESUF): tests/qemu-iotests/socket_scm_helper.o
-tests/test-qemu-opts$(EXESUF): tests/test-qemu-opts.o libqemuutil.a libqemustub.a
-tests/test-write-threshold$(EXESUF): tests/test-write-threshold.o $(block-obj-y) libqemuutil.a libqemustub.a
+tests/test-qemu-opts$(EXESUF): tests/test-qemu-opts.o $(test-util-obj-y)
+tests/test-write-threshold$(EXESUF): tests/test-write-threshold.o $(test-block-obj-y)
 
 ifeq ($(CONFIG_POSIX),y)
 LIBS += -lutil
 endif
+LIBS += $(TEST_LIBS)
+CFLAGS += $(TEST_CFLAGS)
 
 # QTest rules
 
@@ -422,7 +443,7 @@ QTEST_TARGETS=$(foreach TARGET,$(TARGETS), $(if $(check-qtest-$(TARGET)-y), $(TA
 endif
 check-qtest-$(CONFIG_POSIX)=$(foreach TARGET,$(TARGETS), $(check-qtest-$(TARGET)-y))
 
-qtest-obj-y = tests/libqtest.o libqemuutil.a libqemustub.a
+qtest-obj-y = tests/libqtest.o $(test-util-obj-y)
 $(check-qtest-y): $(qtest-obj-y)
 
 .PHONY: check-help

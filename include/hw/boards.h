@@ -99,7 +99,8 @@ struct MachineClass {
         no_cdrom:1,
         no_sdcard:1,
         has_dynamic_sysbus:1,
-        no_tco:1;
+        no_tco:1,
+        pci_allow_0_address:1;
     int is_default;
     const char *default_machine_opts;
     const char *default_boot_order;
@@ -135,6 +136,7 @@ struct MachineState {
     bool mem_merge;
     bool usb;
     bool usb_disabled;
+    bool igd_gfx_passthru;
     char *firmware;
     bool iommu;
     bool suppress_vmdesc;

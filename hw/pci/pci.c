@@ -38,6 +38,7 @@
 #include "hw/pci/msix.h"
 #include "exec/address-spaces.h"
 #include "hw/hotplug.h"
+#include "hw/boards.h"
 
 //#define DEBUG_PCI
 #ifdef DEBUG_PCI
@@ -1065,6 +1066,10 @@ static pcibus_t pci_bar_address(PCIDevice *d,
     pcibus_t new_addr, last_addr;
     int bar = pci_bar(d, reg);
     uint16_t cmd = pci_get_word(d->config + PCI_COMMAND);
+    Object *machine = qdev_get_machine();
+    ObjectClass *oc = object_get_class(machine);
+    MachineClass *mc = MACHINE_CLASS(oc);
+    bool allow_0_address = mc->pci_allow_0_address;
 
     if (type & PCI_BASE_ADDRESS_SPACE_IO) {
         if (!(cmd & PCI_COMMAND_IO)) {
@@ -1075,7 +1080,8 @@ static pcibus_t pci_bar_address(PCIDevice *d,
         /* Check if 32 bit BAR wraps around explicitly.
          * TODO: make priorities correct and remove this work around.
          */
-        if (last_addr <= new_addr || new_addr == 0 || last_addr >= UINT32_MAX) {
+        if (last_addr <= new_addr || last_addr >= UINT32_MAX ||
+            (!allow_0_address && new_addr == 0)) {
             return PCI_BAR_UNMAPPED;
         }
         return new_addr;
@@ -1099,8 +1105,8 @@ static pcibus_t pci_bar_address(PCIDevice *d,
     /* XXX: as we cannot support really dynamic
        mappings, we handle specific values as invalid
        mappings. */
-    if (last_addr <= new_addr || new_addr == 0 ||
-        last_addr == PCI_BAR_UNMAPPED) {
+    if (last_addr <= new_addr || last_addr == PCI_BAR_UNMAPPED ||
+        (!allow_0_address && new_addr == 0)) {
         return PCI_BAR_UNMAPPED;
     }
 
@@ -1148,16 +1154,16 @@ static void pci_update_mappings(PCIDevice *d)
         /* now do the real mapping */
         if (r->addr != PCI_BAR_UNMAPPED) {
             trace_pci_update_mappings_del(d, pci_bus_num(d->bus),
-                                          PCI_FUNC(d->devfn),
                                           PCI_SLOT(d->devfn),
+                                          PCI_FUNC(d->devfn),
                                           i, r->addr, r->size);
             memory_region_del_subregion(r->address_space, r->memory);
         }
         r->addr = new_addr;
         if (r->addr != PCI_BAR_UNMAPPED) {
             trace_pci_update_mappings_add(d, pci_bus_num(d->bus),
-                                          PCI_FUNC(d->devfn),
                                           PCI_SLOT(d->devfn),
+                                          PCI_FUNC(d->devfn),
                                           i, r->addr, r->size);
             memory_region_add_subregion_overlap(r->address_space,
                                                 r->addr, r->memory, 1);
@@ -2087,9 +2093,7 @@ static void pci_add_option_rom(PCIDevice *pdev, bool is_default_rom,
         g_free(path);
         return;
     }
-    if (size & (size - 1)) {
-        size = 1 << qemu_fls(size);
-    }
+    size = pow2ceil(size);
 
     vmsd = qdev_get_vmsd(DEVICE(pdev));
 
@@ -2099,7 +2103,7 @@ static void pci_add_option_rom(PCIDevice *pdev, bool is_default_rom,
         snprintf(name, sizeof(name), "%s.rom", object_get_typename(OBJECT(pdev)));
     }
     pdev->has_rom = true;
-    memory_region_init_ram(&pdev->rom, OBJECT(pdev), name, size, &error_abort);
+    memory_region_init_ram(&pdev->rom, OBJECT(pdev), name, size, &error_fatal);
     vmstate_register_ram(&pdev->rom, &pdev->qdev);
     ptr = memory_region_get_ram_ptr(&pdev->rom);
     load_image(path, ptr);
@@ -2401,17 +2405,14 @@ static void pci_device_class_init(ObjectClass *klass, void *data)
 AddressSpace *pci_device_iommu_address_space(PCIDevice *dev)
 {
     PCIBus *bus = PCI_BUS(dev->bus);
+    PCIBus *iommu_bus = bus;
 
-    if (bus->iommu_fn) {
-        return bus->iommu_fn(bus, bus->iommu_opaque, dev->devfn);
+    while(iommu_bus && !iommu_bus->iommu_fn && iommu_bus->parent_dev) {
+        iommu_bus = PCI_BUS(iommu_bus->parent_dev->bus);
     }
-
-    if (bus->parent_dev) {
-        /** We are ignoring the bus master DMA bit of the bridge
-         *  as it would complicate things such as VFIO for no good reason */
-        return pci_device_iommu_address_space(bus->parent_dev);
+    if (iommu_bus && iommu_bus->iommu_fn) {
+        return iommu_bus->iommu_fn(bus, iommu_bus->iommu_opaque, dev->devfn);
     }
-
     return &address_space_memory;
 }
 

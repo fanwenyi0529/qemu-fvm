@@ -396,7 +396,7 @@ struct CPUMIPSState {
 #define CP0C0_KU   25
 #define CP0C0_SB   21
 #define CP0C0_MDU  20
-#define CP0C0_MM   17
+#define CP0C0_MM   18
 #define CP0C0_BM   16
 #define CP0C0_BE   15
 #define CP0C0_AT   13
@@ -636,7 +636,7 @@ extern uint32_t cpu_rddsp(uint32_t mask_num, CPUMIPSState *env);
 #define MMU_MODE1_SUFFIX _super
 #define MMU_MODE2_SUFFIX _user
 #define MMU_USER_IDX 2
-static inline int cpu_mmu_index (CPUMIPSState *env)
+static inline int cpu_mmu_index (CPUMIPSState *env, bool ifetch)
 {
     return env->hflags & MIPS_HFLAG_KSU;
 }
@@ -1050,5 +1050,29 @@ static inline void cpu_mips_store_cause(CPUMIPSState *env, target_ulong val)
     }
 }
 #endif
+
+static inline void QEMU_NORETURN do_raise_exception_err(CPUMIPSState *env,
+                                                        uint32_t exception,
+                                                        int error_code,
+                                                        uintptr_t pc)
+{
+    CPUState *cs = CPU(mips_env_get_cpu(env));
+
+    if (exception < EXCP_SC) {
+        qemu_log_mask(CPU_LOG_INT, "%s: %d %d\n",
+                      __func__, exception, error_code);
+    }
+    cs->exception_index = exception;
+    env->error_code = error_code;
+
+    cpu_loop_exit_restore(cs, pc);
+}
+
+static inline void QEMU_NORETURN do_raise_exception(CPUMIPSState *env,
+                                                    uint32_t exception,
+                                                    uintptr_t pc)
+{
+    do_raise_exception_err(env, exception, 0, pc);
+}
 
 #endif /* !defined (__MIPS_CPU_H__) */

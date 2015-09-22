@@ -280,7 +280,7 @@ static void validate_numa_cpus(void)
             bitmap_and(seen_cpus, seen_cpus,
                        numa_info[i].node_cpu, MAX_CPUMASK_BITS);
             error_report("CPU(s) present in multiple NUMA nodes: %s",
-                         enumerate_cpus(seen_cpus, max_cpus));;
+                         enumerate_cpus(seen_cpus, max_cpus));
             exit(EXIT_FAILURE);
         }
         bitmap_or(seen_cpus, seen_cpus,
@@ -424,14 +424,14 @@ static void allocate_system_memory_nonnuma(MemoryRegion *mr, Object *owner,
          */
         if (err) {
             error_report_err(err);
-            memory_region_init_ram(mr, owner, name, ram_size, &error_abort);
+            memory_region_init_ram(mr, owner, name, ram_size, &error_fatal);
         }
 #else
         fprintf(stderr, "-mem-path not supported on this host\n");
         exit(1);
 #endif
     } else {
-        memory_region_init_ram(mr, owner, name, ram_size, &error_abort);
+        memory_region_init_ram(mr, owner, name, ram_size, &error_fatal);
     }
     vmstate_register_ram_global(mr);
 }

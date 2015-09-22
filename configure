@@ -243,7 +243,6 @@ vnc="yes"
 sparse="no"
 uuid=""
 vde=""
-vnc_tls=""
 vnc_sasl=""
 vnc_jpeg=""
 vnc_png=""
@@ -295,7 +294,6 @@ cocoa="no"
 softmmu="yes"
 linux_user="no"
 bsd_user="no"
-guest_base="yes"
 aix="no"
 blobs="yes"
 pkgversion=""
@@ -340,6 +338,7 @@ libssh2=""
 vhdx=""
 numa=""
 tcmalloc="no"
+jemalloc="no"
 
 # parse CC options first
 for opt do
@@ -426,6 +425,9 @@ if test "$debug_info" = "yes"; then
     CFLAGS="-g $CFLAGS"
     LDFLAGS="-g $LDFLAGS"
 fi
+
+test_cflags=""
+test_libs=""
 
 # make source path absolute
 source_path=`cd "$source_path"; pwd`
@@ -762,7 +764,7 @@ if test "$mingw32" = "yes" ; then
   sysconfdir="\${prefix}"
   local_statedir=
   confsuffix=""
-  libs_qga="-lws2_32 -lwinmm -lpowrprof -liphlpapi $libs_qga"
+  libs_qga="-lws2_32 -lwinmm -lpowrprof -liphlpapi -lnetapi32 $libs_qga"
 fi
 
 werror=""
@@ -909,10 +911,6 @@ for opt do
   ;;
   --disable-strip) strip_opt="no"
   ;;
-  --disable-vnc-tls) vnc_tls="no"
-  ;;
-  --enable-vnc-tls) vnc_tls="yes"
-  ;;
   --disable-vnc-sasl) vnc_sasl="no"
   ;;
   --enable-vnc-sasl) vnc_sasl="yes"
@@ -985,7 +983,6 @@ for opt do
   ;;
   --enable-cocoa)
       cocoa="yes" ;
-      sdl="no" ;
       audio_drv_list="coreaudio `echo $audio_drv_list | sed s,coreaudio,,g`"
   ;;
   --disable-system) softmmu="no"
@@ -1004,10 +1001,6 @@ for opt do
   --disable-bsd-user) bsd_user="no"
   ;;
   --enable-bsd-user) bsd_user="yes"
-  ;;
-  --enable-guest-base) guest_base="yes"
-  ;;
-  --disable-guest-base) guest_base="no"
   ;;
   --enable-pie) pie="yes"
   ;;
@@ -1178,6 +1171,10 @@ for opt do
   ;;
   --enable-tcmalloc) tcmalloc="yes"
   ;;
+  --disable-jemalloc) jemalloc="no"
+  ;;
+  --enable-jemalloc) jemalloc="yes"
+  ;;
   *)
       echo "ERROR: unknown option $opt"
       echo "Try '$0 --help' for more information"
@@ -1344,7 +1341,6 @@ disabled with --disable-FEATURE, default is enabled if available:
   user            supported user emulation targets
   linux-user      all linux usermode emulation targets
   bsd-user        all BSD usermode emulation targets
-  guest-base      GUEST_BASE support for usermode emulation targets
   docs            build documentation
   guest-agent     build the QEMU Guest Agent
   guest-agent-msi build guest agent Windows MSI installation package
@@ -1403,6 +1399,7 @@ disabled with --disable-FEATURE, default is enabled if available:
   vhdx            support for the Microsoft VHDX image format
   numa            libnuma support
   tcmalloc        tcmalloc support
+  jemalloc        jemalloc support
 
 NOTE: The object files are built at the place where configure is launched
 EOF
@@ -1744,6 +1741,21 @@ else
 fi
 
 ##########################################
+# cocoa implies not SDL or GTK
+# (the cocoa UI code currently assumes it is always the active UI
+# and doesn't interact well with other UI frontend code)
+if test "$cocoa" = "yes"; then
+    if test "$sdl" = "yes"; then
+        error_exit "Cocoa and SDL UIs cannot both be enabled at once"
+    fi
+    if test "$gtk" = "yes"; then
+        error_exit "Cocoa and GTK UIs cannot both be enabled at once"
+    fi
+    gtk=no
+    sdl=no
+fi
+
+##########################################
 # L2TPV3 probe
 
 cat > $TMPC <<EOF
@@ -1897,6 +1909,34 @@ EOF
     xen=no
 
   # Xen unstable
+  elif
+      cat > $TMPC <<EOF &&
+#include <xenctrl.h>
+#include <xenstore.h>
+#include <stdint.h>
+#include <xen/hvm/hvm_info_table.h>
+#if !defined(HVM_MAX_VCPUS)
+# error HVM_MAX_VCPUS not defined
+#endif
+int main(void) {
+  xc_interface *xc;
+  xs_daemon_open();
+  xc = xc_interface_open(0, 0, 0);
+  xc_hvm_set_mem_type(0, 0, HVMMEM_ram_ro, 0, 0);
+  xc_gnttab_open(NULL, 0);
+  xc_domain_add_to_physmap(0, 0, XENMAPSPACE_gmfn, 0, 0);
+  xc_hvm_inject_msi(xc, 0, 0xf0000000, 0x00000000);
+  xc_hvm_create_ioreq_server(xc, 0, HVM_IOREQSRV_BUFIOREQ_ATOMIC, NULL);
+  xc_reserved_device_memory_map(xc, 0, 0, 0, 0, NULL, 0);
+  return 0;
+}
+EOF
+      compile_prog "" "$xen_libs"
+    then
+    xen_ctrl_version=460
+    xen=yes
+
+  # Xen 4.5
   elif
       cat > $TMPC <<EOF &&
 #include <xenctrl.h>
@@ -2240,6 +2280,19 @@ if test "$gnutls_nettle" != "no"; then
     fi
 fi
 
+##########################################
+# libtasn1 - only for the TLS creds/session test suite
+
+tasn1=yes
+if $pkg_config --exists "libtasn1"; then
+    tasn1_cflags=`$pkg_config --cflags libtasn1`
+    tasn1_libs=`$pkg_config --libs libtasn1`
+    test_cflags="$test_cflags $tasn1_cflags"
+    test_libs="$test_libs $tasn1_libs"
+else
+    tasn1=no
+fi
+
 
 ##########################################
 # VTE probe
@@ -2320,9 +2373,7 @@ EOF
     if test "$_sdlversion" -lt 121 ; then
       sdl_too_old=yes
     else
-      if test "$cocoa" = "no" ; then
-        sdl=yes
-      fi
+      sdl=yes
     fi
 
     # static link with sdl ? (note: sdl.pc's --static --libs is broken)
@@ -2383,34 +2434,6 @@ EOF
             "  (3) Also: Install softiwarp if you don't have RDMA hardware"
     fi
     rdma="no"
-  fi
-fi
-
-##########################################
-# VNC TLS/WS detection
-if test "$vnc" = "yes" -a "$vnc_tls" != "no" ; then
-  cat > $TMPC <<EOF
-#include <gnutls/gnutls.h>
-int main(void) { gnutls_session_t s; gnutls_init(&s, GNUTLS_SERVER); return 0; }
-EOF
-  if $pkg_config --exists gnutls; then
-    vnc_tls_cflags=`$pkg_config --cflags gnutls 2> /dev/null`
-    vnc_tls_libs=`$pkg_config --libs gnutls 2>/dev/null`
-  else
-    vnc_tls_cflags=
-    vnc_tls_libs=-lgnutls
-  fi
-  if compile_prog "$vnc_tls_cflags" "$vnc_tls_libs" ; then
-    if test "$vnc_tls" != "no" ; then
-      vnc_tls=yes
-    fi
-    libs_softmmu="$vnc_tls_libs $libs_softmmu"
-    QEMU_CFLAGS="$QEMU_CFLAGS $vnc_tls_cflags"
-  else
-    if test "$vnc_tls" = "yes" ; then
-      feature_not_found "vnc-tls" "Install gnutls devel"
-    fi
-    vnc_tls=no
   fi
 fi
 
@@ -3400,6 +3423,11 @@ EOF
   fi
 fi
 
+if test "$tcmalloc" = "yes" && test "$jemalloc" = "yes" ; then
+    echo "ERROR: tcmalloc && jemalloc can't be used at the same time"
+    exit 1
+fi
+
 ##########################################
 # tcmalloc probe
 
@@ -3413,6 +3441,22 @@ EOF
     LIBS="-ltcmalloc $LIBS"
   else
     feature_not_found "tcmalloc" "install gperftools devel"
+  fi
+fi
+
+##########################################
+# jemalloc probe
+
+if test "$jemalloc" = "yes" ; then
+  cat > $TMPC << EOF
+#include <stdlib.h>
+int main(void) { malloc(1); return 0; }
+EOF
+
+  if compile_prog "" "-ljemalloc" ; then
+    LIBS="-ljemalloc $LIBS"
+  else
+    feature_not_found "jemalloc" "install jemalloc devel"
   fi
 fi
 
@@ -3892,6 +3936,7 @@ EOF
     guest_agent_with_vss="yes"
     QEMU_CFLAGS="$QEMU_CFLAGS $vss_win32_include"
     libs_qga="-lole32 -loleaut32 -lshlwapi -luuid -lstdc++ -Wl,--enable-stdcall-fixup $libs_qga"
+    qga_vss_provider="qga/vss-win32/qga-vss.dll qga/vss-win32/qga-vss.tlb"
   else
     if test "$vss_win32_sdk" != "" ; then
       echo "ERROR: Please download and install Microsoft VSS SDK:"
@@ -3943,58 +3988,6 @@ EOF
     guest_agent_ntddscsi=yes
     libs_qga="-lsetupapi $libs_qga"
   fi
-fi
-
-##########################################
-# Guest agent Window MSI  package
-
-if test "$guest_agent" != yes; then
-  if test "$guest_agent_msi" = yes; then
-    error_exit "MSI guest agent package requires guest agent enabled"
-  fi
-  guest_agent_msi=no
-elif test "$mingw32" != "yes"; then
-  if test "$guest_agent_msi" = "yes"; then
-    error_exit "MSI guest agent package is available only for MinGW Windows cross-compilation"
-  fi
-  guest_agent_msi=no
-elif ! has wixl; then
-  if test "$guest_agent_msi" = "yes"; then
-    error_exit "MSI guest agent package requires wixl tool installed ( usually from msitools package )"
-  fi
-  guest_agent_msi=no
-fi
-
-if test "$guest_agent_msi" != "no"; then
-  if test "$guest_agent_with_vss" = "yes"; then
-    QEMU_GA_MSI_WITH_VSS="-D InstallVss"
-  fi
-
-  if test "$QEMU_GA_MANUFACTURER" = ""; then
-    QEMU_GA_MANUFACTURER=QEMU
-  fi
-
-  if test "$QEMU_GA_DISTRO" = ""; then
-    QEMU_GA_DISTRO=Linux
-  fi
-
-  if test "$QEMU_GA_VERSION" = ""; then
-      QEMU_GA_VERSION=`cat $source_path/VERSION`
-  fi
-
-  QEMU_GA_MSI_MINGW_DLL_PATH="-D Mingw_dlls=`$pkg_config --variable=prefix glib-2.0`/bin"
-  
-  case "$cpu" in
-  x86_64)
-    QEMU_GA_MSI_ARCH="-a x64 -D Arch=64"
-    ;;
-  i386)
-    QEMU_GA_MSI_ARCH="-D Arch=32"
-    ;;
-  *)
-    error_exit "CPU $cpu not supported for building installation package"
-    ;;
-  esac
 fi
 
 ##########################################
@@ -4436,18 +4429,75 @@ if test "$softmmu" = yes ; then
     fi
   fi
 fi
+
+# Probe for guest agent support/options
+
 if [ "$guest_agent" != "no" ]; then
   if [ "$linux" = "yes" -o "$bsd" = "yes" -o "$solaris" = "yes" -o "$mingw32" = "yes" ] ; then
       tools="qemu-ga\$(EXESUF) $tools"
-      if [ "$mingw32" = "yes" -a "$guest_agent_with_vss" = "yes" ]; then
-        tools="qga/vss-win32/qga-vss.dll qga/vss-win32/qga-vss.tlb $tools"
-      fi
       guest_agent=yes
   elif [ "$guest_agent" != yes ]; then
       guest_agent=no
   else
       error_exit "Guest agent is not supported on this platform"
   fi
+fi
+
+# Guest agent Window MSI  package
+
+if test "$guest_agent" != yes; then
+  if test "$guest_agent_msi" = yes; then
+    error_exit "MSI guest agent package requires guest agent enabled"
+  fi
+  guest_agent_msi=no
+elif test "$mingw32" != "yes"; then
+  if test "$guest_agent_msi" = "yes"; then
+    error_exit "MSI guest agent package is available only for MinGW Windows cross-compilation"
+  fi
+  guest_agent_msi=no
+elif ! has wixl; then
+  if test "$guest_agent_msi" = "yes"; then
+    error_exit "MSI guest agent package requires wixl tool installed ( usually from msitools package )"
+  fi
+  guest_agent_msi=no
+else
+  # we support qemu-ga, mingw32, and wixl: default to MSI enabled if it wasn't
+  # disabled explicitly
+  if test "$guest_agent_msi" != "no"; then
+    guest_agent_msi=yes
+  fi
+fi
+
+if test "$guest_agent_msi" = "yes"; then
+  if test "$guest_agent_with_vss" = "yes"; then
+    QEMU_GA_MSI_WITH_VSS="-D InstallVss"
+  fi
+
+  if test "$QEMU_GA_MANUFACTURER" = ""; then
+    QEMU_GA_MANUFACTURER=QEMU
+  fi
+
+  if test "$QEMU_GA_DISTRO" = ""; then
+    QEMU_GA_DISTRO=Linux
+  fi
+
+  if test "$QEMU_GA_VERSION" = ""; then
+      QEMU_GA_VERSION=`cat $source_path/VERSION`
+  fi
+
+  QEMU_GA_MSI_MINGW_DLL_PATH="-D Mingw_dlls=`$pkg_config --variable=prefix glib-2.0`/bin"
+
+  case "$cpu" in
+  x86_64)
+    QEMU_GA_MSI_ARCH="-a x64 -D Arch=64"
+    ;;
+  i386)
+    QEMU_GA_MSI_ARCH="-D Arch=32"
+    ;;
+  *)
+    error_exit "CPU $cpu not supported for building installation package"
+    ;;
+  esac
 fi
 
 # Mac OS X ships with a broken assembler
@@ -4553,6 +4603,7 @@ echo "GNUTLS support    $gnutls"
 echo "GNUTLS hash       $gnutls_hash"
 echo "GNUTLS gcrypt     $gnutls_gcrypt"
 echo "GNUTLS nettle     $gnutls_nettle ${gnutls_nettle+($nettle_version)}"
+echo "libtasn1          $tasn1"
 echo "VTE support       $vte"
 echo "curses support    $curses"
 echo "curl support      $curl"
@@ -4563,7 +4614,6 @@ echo "Block whitelist (ro) $block_drv_ro_whitelist"
 echo "VirtFS support    $virtfs"
 echo "VNC support       $vnc"
 if test "$vnc" = "yes" ; then
-    echo "VNC TLS support   $vnc_tls"
     echo "VNC SASL support  $vnc_sasl"
     echo "VNC JPEG support  $vnc_jpeg"
     echo "VNC PNG support   $vnc_png"
@@ -4579,7 +4629,6 @@ echo "brlapi support    $brlapi"
 echo "bluez  support    $bluez"
 echo "Documentation     $docs"
 echo "Tools             $tools"
-echo "GUEST_BASE        $guest_base"
 echo "PIE               $pie"
 echo "vde support       $vde"
 echo "netmap support    $netmap"
@@ -4619,6 +4668,7 @@ echo "libnfs support    $libnfs"
 echo "build guest agent $guest_agent"
 echo "QGA VSS support   $guest_agent_with_vss"
 echo "QGA w32 disk info $guest_agent_ntddscsi"
+echo "QGA MSI support   $guest_agent_msi"
 echo "seccomp support   $seccomp"
 echo "coroutine backend $coroutine"
 echo "coroutine pool    $coroutine_pool"
@@ -4636,6 +4686,7 @@ echo "snappy support    $snappy"
 echo "bzip2 support     $bzip2"
 echo "NUMA host support $numa"
 echo "tcmalloc support  $tcmalloc"
+echo "jemalloc support  $jemalloc"
 
 if test "$sdl_too_old" = "yes"; then
 echo "-> Your SDL version is too old - please upgrade to have SDL support"
@@ -4694,12 +4745,13 @@ if test "$mingw32" = "yes" ; then
   echo "CONFIG_PRODUCTVERSION=$version_major,$version_minor,$version_subminor,$version_micro" >> $config_host_mak
   if test "$guest_agent_with_vss" = "yes" ; then
     echo "CONFIG_QGA_VSS=y" >> $config_host_mak
+    echo "QGA_VSS_PROVIDER=$qga_vss_provider" >> $config_host_mak
     echo "WIN_SDK=\"$win_sdk\"" >> $config_host_mak
   fi
   if test "$guest_agent_ntddscsi" = "yes" ; then
     echo "CONFIG_QGA_NTDDDISK=y" >> $config_host_mak
   fi
-  if test "$guest_agent_msi" != "no"; then
+  if test "$guest_agent_msi" = "yes"; then
     echo "QEMU_GA_MSI_ENABLED=yes" >> $config_host_mak  
     echo "QEMU_GA_MSI_MINGW_DLL_PATH=${QEMU_GA_MSI_MINGW_DLL_PATH}" >> $config_host_mak
     echo "QEMU_GA_MSI_WITH_VSS=${QEMU_GA_MSI_WITH_VSS}" >> $config_host_mak
@@ -4771,9 +4823,6 @@ echo "CONFIG_BDRV_RW_WHITELIST=$block_drv_rw_whitelist" >> $config_host_mak
 echo "CONFIG_BDRV_RO_WHITELIST=$block_drv_ro_whitelist" >> $config_host_mak
 if test "$vnc" = "yes" ; then
   echo "CONFIG_VNC=y" >> $config_host_mak
-fi
-if test "$vnc_tls" = "yes" ; then
-  echo "CONFIG_VNC_TLS=y" >> $config_host_mak
 fi
 if test "$vnc_sasl" = "yes" ; then
   echo "CONFIG_VNC_SASL=y" >> $config_host_mak
@@ -4926,6 +4975,9 @@ fi
 if test "$gnutls_nettle" = "yes" ; then
   echo "CONFIG_GNUTLS_NETTLE=y" >> $config_host_mak
   echo "CONFIG_NETTLE_VERSION_MAJOR=${nettle_version%%.*}" >> $config_host_mak
+fi
+if test "$tasn1" = "yes" ; then
+  echo "CONFIG_TASN1=y" >> $config_host_mak
 fi
 if test "$vte" = "yes" ; then
   echo "CONFIG_VTE=y" >> $config_host_mak
@@ -5250,6 +5302,8 @@ echo "EXESUF=$EXESUF" >> $config_host_mak
 echo "DSOSUF=$DSOSUF" >> $config_host_mak
 echo "LDFLAGS_SHARED=$LDFLAGS_SHARED" >> $config_host_mak
 echo "LIBS_QGA+=$libs_qga" >> $config_host_mak
+echo "TEST_LIBS=$test_libs" >> $config_host_mak
+echo "TEST_CFLAGS=$test_cflags" >> $config_host_mak
 echo "POD2MAN=$POD2MAN" >> $config_host_mak
 echo "TRANSLATE_OPT_CFLAGS=$TRANSLATE_OPT_CFLAGS" >> $config_host_mak
 if test "$gcov" = "yes" ; then
@@ -5430,7 +5484,9 @@ case "$target_name" in
     echo "TARGET_ABI32=y" >> $config_target_mak
   ;;
   s390x)
-    gdb_xml_files="s390x-core64.xml s390-acr.xml s390-fpr.xml s390-vx.xml"
+    gdb_xml_files="s390x-core64.xml s390-acr.xml s390-fpr.xml s390-vx.xml s390-cr.xml"
+  ;;
+  tilegx)
   ;;
   tricore)
   ;;
@@ -5520,9 +5576,6 @@ fi
 if test "$target_user_only" = "yes" -a "$bflt" = "yes"; then
   echo "TARGET_HAS_BFLT=y" >> $config_target_mak
 fi
-if test "$target_user_only" = "yes" -a "$guest_base" = "yes"; then
-  echo "CONFIG_USE_GUEST_BASE=y" >> $config_target_mak
-fi
 if test "$target_bsd_user" = "yes" ; then
   echo "CONFIG_BSD_USER=y" >> $config_target_mak
 fi
@@ -5532,91 +5585,76 @@ fi
 cflags=""
 ldflags=""
 
+disas_config() {
+  echo "CONFIG_${1}_DIS=y" >> $config_target_mak
+  echo "CONFIG_${1}_DIS=y" >> config-all-disas.mak
+}
+
 for i in $ARCH $TARGET_BASE_ARCH ; do
   case "$i" in
   alpha)
-    echo "CONFIG_ALPHA_DIS=y"  >> $config_target_mak
-    echo "CONFIG_ALPHA_DIS=y"  >> config-all-disas.mak
+    disas_config "ALPHA"
   ;;
   aarch64)
     if test -n "${cxx}"; then
-      echo "CONFIG_ARM_A64_DIS=y"  >> $config_target_mak
-      echo "CONFIG_ARM_A64_DIS=y"  >> config-all-disas.mak
+      disas_config "ARM_A64"
     fi
   ;;
   arm)
-    echo "CONFIG_ARM_DIS=y"  >> $config_target_mak
-    echo "CONFIG_ARM_DIS=y"  >> config-all-disas.mak
+    disas_config "ARM"
     if test -n "${cxx}"; then
-      echo "CONFIG_ARM_A64_DIS=y"  >> $config_target_mak
-      echo "CONFIG_ARM_A64_DIS=y"  >> config-all-disas.mak
+      disas_config "ARM_A64"
     fi
   ;;
   cris)
-    echo "CONFIG_CRIS_DIS=y"  >> $config_target_mak
-    echo "CONFIG_CRIS_DIS=y"  >> config-all-disas.mak
+    disas_config "CRIS"
   ;;
   hppa)
-    echo "CONFIG_HPPA_DIS=y"  >> $config_target_mak
-    echo "CONFIG_HPPA_DIS=y"  >> config-all-disas.mak
+    disas_config "HPPA"
   ;;
   i386|x86_64|x32)
-    echo "CONFIG_I386_DIS=y"  >> $config_target_mak
-    echo "CONFIG_I386_DIS=y"  >> config-all-disas.mak
+    disas_config "I386"
   ;;
   ia64*)
-    echo "CONFIG_IA64_DIS=y"  >> $config_target_mak
-    echo "CONFIG_IA64_DIS=y"  >> config-all-disas.mak
+    disas_config "IA64"
   ;;
   lm32)
-    echo "CONFIG_LM32_DIS=y"  >> $config_target_mak
-    echo "CONFIG_LM32_DIS=y"  >> config-all-disas.mak
+    disas_config "LM32"
   ;;
   m68k)
-    echo "CONFIG_M68K_DIS=y"  >> $config_target_mak
-    echo "CONFIG_M68K_DIS=y"  >> config-all-disas.mak
+    disas_config "M68K"
   ;;
   microblaze*)
-    echo "CONFIG_MICROBLAZE_DIS=y"  >> $config_target_mak
-    echo "CONFIG_MICROBLAZE_DIS=y"  >> config-all-disas.mak
+    disas_config "MICROBLAZE"
   ;;
   mips*)
-    echo "CONFIG_MIPS_DIS=y"  >> $config_target_mak
-    echo "CONFIG_MIPS_DIS=y"  >> config-all-disas.mak
+    disas_config "MIPS"
   ;;
   moxie*)
-    echo "CONFIG_MOXIE_DIS=y"  >> $config_target_mak
-    echo "CONFIG_MOXIE_DIS=y"  >> config-all-disas.mak
+    disas_config "MOXIE"
   ;;
   or32)
-    echo "CONFIG_OPENRISC_DIS=y"  >> $config_target_mak
-    echo "CONFIG_OPENRISC_DIS=y"  >> config-all-disas.mak
+    disas_config "OPENRISC"
   ;;
   ppc*)
-    echo "CONFIG_PPC_DIS=y"  >> $config_target_mak
-    echo "CONFIG_PPC_DIS=y"  >> config-all-disas.mak
+    disas_config "PPC"
   ;;
   s390*)
-    echo "CONFIG_S390_DIS=y"  >> $config_target_mak
-    echo "CONFIG_S390_DIS=y"  >> config-all-disas.mak
+    disas_config "S390"
   ;;
   sh4)
-    echo "CONFIG_SH4_DIS=y"  >> $config_target_mak
-    echo "CONFIG_SH4_DIS=y"  >> config-all-disas.mak
+    disas_config "SH4"
   ;;
   sparc*)
-    echo "CONFIG_SPARC_DIS=y"  >> $config_target_mak
-    echo "CONFIG_SPARC_DIS=y"  >> config-all-disas.mak
+    disas_config "SPARC"
   ;;
   xtensa*)
-    echo "CONFIG_XTENSA_DIS=y"  >> $config_target_mak
-    echo "CONFIG_XTENSA_DIS=y"  >> config-all-disas.mak
+    disas_config "XTENSA"
   ;;
   esac
 done
 if test "$tcg_interpreter" = "yes" ; then
-  echo "CONFIG_TCI_DIS=y"  >> $config_target_mak
-  echo "CONFIG_TCI_DIS=y"  >> config-all-disas.mak
+  disas_config "TCI"
 fi
 
 case "$ARCH" in
@@ -5649,10 +5687,6 @@ done # for target in $targets
 
 if [ "$pixman" = "internal" ]; then
   echo "config-host.h: subdir-pixman" >> $config_host_mak
-fi
-
-if test "$rdma" = "yes" ; then
-echo "CONFIG_RDMA=y" >> $config_host_mak
 fi
 
 if [ "$dtc_internal" = "yes" ]; then

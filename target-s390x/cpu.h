@@ -143,8 +143,6 @@ typedef struct CPUS390XState {
     uint32_t cpu_num;
     uint32_t machine_type;
 
-    uint8_t *storage_keys;
-
     uint64_t tod_offset;
     uint64_t tod_basetime;
     QEMUTimer *tod_timer;
@@ -310,7 +308,7 @@ static inline CPU_DoubleU *get_freg(CPUS390XState *cs, int nr)
 #define MMU_SECONDARY_IDX       1
 #define MMU_HOME_IDX            2
 
-static inline int cpu_mmu_index (CPUS390XState *env)
+static inline int cpu_mmu_index (CPUS390XState *env, bool ifetch)
 {
     switch (env->psw.mask & PSW_MASK_ASC) {
     case PSW_ASC_PRIMARY:

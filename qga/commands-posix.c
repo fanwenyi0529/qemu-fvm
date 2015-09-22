@@ -2158,7 +2158,7 @@ static void transfer_memory_block(GuestMemoryBlock *mem_blk, bool sys2memblk,
 
         ga_read_sysfs_file(dirfd, "removable", &removable, 1, &local_err);
         if (local_err) {
-            /* if no 'removable' file, it does't support offline mem blk */
+            /* if no 'removable' file, it doesn't support offline mem blk */
             if (errno == ENOENT) {
                 error_free(local_err);
                 mem_blk->can_offline = false;
@@ -2454,7 +2454,7 @@ GList *ga_command_blacklist_init(GList *blacklist)
         char **p = (char **)list;
 
         while (*p) {
-            blacklist = g_list_append(blacklist, *p++);
+            blacklist = g_list_append(blacklist, g_strdup(*p++));
         }
     }
 #endif
@@ -2468,13 +2468,13 @@ GList *ga_command_blacklist_init(GList *blacklist)
         char **p = (char **)list;
 
         while (*p) {
-            blacklist = g_list_append(blacklist, *p++);
+            blacklist = g_list_append(blacklist, g_strdup(*p++));
         }
     }
 #endif
 
 #if !defined(CONFIG_FSTRIM)
-    blacklist = g_list_append(blacklist, (char *)"guest-fstrim");
+    blacklist = g_list_append(blacklist, g_strdup("guest-fstrim"));
 #endif
 
     return blacklist;
