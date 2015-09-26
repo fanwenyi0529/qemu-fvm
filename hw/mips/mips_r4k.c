@@ -315,22 +315,18 @@ void mipsel_r4k_init(MachineState *machine)
     mips_init(machine);
 }
 
-static QEMUMachine mips_machine = {
-    .name = "mips",
-    .desc = "MIPS r4k platform",
-    .init = mips_r4k_init,
-};
-
-static QEMUMachine mipsel_machine = {
-    .name = "mipsel",
-    .desc = "MIPS r4k platform (little endian)",
-    .init = mipsel_r4k_init,
-};
-
-static void mips_machine_init(void)
+static void mips_machine_init(MachineClass *mc)
 {
-    qemu_register_machine(&mips_machine);
-    qemu_register_machine(&mipsel_machine);
+    mc->desc = "mips r4k platform";
+    mc->init = mips_r4k_init;
 }
 
-machine_init(mips_machine_init);
+DEFINE_MACHINE("mips", mips_machine_init)
+
+static void mipsel_machine_init(MachineClass *mc)
+{
+    mc->desc = "misp r4k platform (little endian)";
+    mc->init = mipsel_r4k_init;
+};
+
+DEFINE_MACHINE("mipsel", mipsel_machine_init)

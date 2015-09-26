@@ -95,15 +95,10 @@ static void syborg_init(MachineState *machine)
     arm_load_kernel(cpu, &syborg_binfo);
 }
 
-static QEMUMachine syborg_machine = {
-    .name = "syborg",
-    .desc = "Syborg (Symbian Virtual Platform)",
-    .init = syborg_init,
+static void syborg_machine_init(MachineClass *mc)
+{
+    mc->desc = "Syborg (Symbian Virtual Platform)";
+    mc->init = syborg_init;
 };
 
-static void syborg_machine_init(void)
-{
-    qemu_register_machine(&syborg_machine);
-}
-
-machine_init(syborg_machine_init);
+DEFINE_MACHINE("syborg", syborg_machine_init)

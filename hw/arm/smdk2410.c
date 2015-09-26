@@ -118,17 +118,11 @@ static void smdk2410_init(MachineState *machine)
     }
 }
 
-
-static QEMUMachine smdk2410_machine = {
-  .name = "smdk2410",
-  .desc = "Samsung SMDK2410 (S3C2410A, ARM920T)",
-  .init = smdk2410_init,
-  .max_cpus = 1,
+static void smdk2410_machine_init(MachineClass *mc)
+{
+    mc->desc = "Samsung SMDK2410 (S3C2410A, ARM920T)";
+    mc->init = smdk2410_init;
+    mc->max_cpus = 1;
 };
 
-static void smdk2410_machine_init(void)
-{
-    qemu_register_machine(&smdk2410_machine);
-}
-
-machine_init(smdk2410_machine_init);
+DEFINE_MACHINE("smdk2410", smdk2410_machine_init)

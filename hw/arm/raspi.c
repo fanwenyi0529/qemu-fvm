@@ -343,15 +343,10 @@ static void raspi_init(MachineState *machine)
     }
 }
 
-static QEMUMachine raspi_machine = {
-    .name = "raspi",
-    .desc = "Raspberry Pi",
-    .init = raspi_init
+static void raspi_machine_init(MachineClass *mc)
+{
+    mc->desc = "Raspberry Pi";
+    mc->init = raspi_init;
 };
 
-static void raspi_machine_init(void)
-{
-    qemu_register_machine(&raspi_machine);
-}
-
-machine_init(raspi_machine_init);
+DEFINE_MACHINE("raspi", raspi_machine_init)

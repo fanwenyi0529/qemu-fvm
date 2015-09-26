@@ -1,11 +1,6 @@
 #ifndef UI_GTK_H
 #define UI_GTK_H
 
-#ifdef _WIN32
-# undef _WIN32_WINNT
-# define _WIN32_WINNT 0x0601 /* needed to get definition of MAPVK_VK_TO_VSC */
-#endif
-
 #ifdef CONFIG_PRAGMA_DIAGNOSTIC_AVAILABLE
 /* Work around an -Wstrict-prototypes warning in GTK headers */
 #pragma GCC diagnostic push

@@ -947,26 +947,26 @@ static const char *clock_regname(unsigned offset)
 
 #if 0
 struct tnetd7300_clock {
-	u32 ctrl;
+    u32 ctrl;
 #define PREDIV_MASK 0x001f0000
 #define PREDIV_SHIFT 16
 #define POSTDIV_MASK 0x0000001f
-	u32 unused1[3];
-	u32 pll;
+    u32 unused1[3];
+    u32 pll;
 #define MUL_MASK 0x0000f000
 #define MUL_SHIFT 12
 #define PLL_MODE_MASK 0x00000001
 #define PLL_NDIV 0x00000800
 #define PLL_DIV 0x00000002
 #define PLL_STATUS 0x00000001
-	u32 unused2[3];
+    u32 unused2[3];
 } __attribute__ ((packed));
 
 struct tnetd7300_clocks {
-	struct tnetd7300_clock bus;
-	struct tnetd7300_clock cpu;
-	struct tnetd7300_clock usb;
-	struct tnetd7300_clock dsp;
+    struct tnetd7300_clock bus;
+    struct tnetd7300_clock cpu;
+    struct tnetd7300_clock usb;
+    struct tnetd7300_clock dsp;
 } __attribute__ ((packed));
 #endif
 
@@ -3661,7 +3661,7 @@ static void ar7_init(AR7State *s, CPUMIPSState *env)
 #endif
     reg_write(av.mdio, MDIO_CONTROL, MDIO_CONTROL_IDLE | BIT(24) | BITS(7, 0));
 
-    //~ .reset_control = { 0x04720043 },
+    //~ .reset_control = { 0x04720043 }
 
     //~ .dcl = 0x025d4297
     reg_write(av.dcl, DCL_BOOT_CONFIG, 0x025d4291);
@@ -4105,66 +4105,110 @@ static void speedport_init(MachineState *machine)
 
 #define RAMSIZE (0 * MiB)
 
-static QEMUMachine ar7_machines[] = {
-  {
-    .name = "ar7",
-    .desc = "MIPS 4KEc / AR7 platform",
-    .init = mips_ar7_init,
-  },
-  {
-    .name = "ar7-amd",
-    .desc = "MIPS AR7 with AMD flash",
-    .init = ar7_amd_init,
-  },
-  {
-    .name = "tnetd7200",
-    .desc = "MIPS 4KEc / TNETD7200 platform",
-    .init = mips_tnetd7200_init,
-  },
-  {
-    .name = "tnetd7300",
-    .desc = "MIPS 4KEc / TNETD7300 platform",
-    .init = mips_tnetd7300_init,
-  },
+static void ar7_machine_init(MachineClass *mc)
+{
+    mc->desc = "MIPS 4KEc / AR7 platform";
+    mc->init = mips_ar7_init;
+    mc->max_cpus = 1;
+}
+
+DEFINE_MACHINE("ar7", ar7_machine_init)
+
+static void ar7_amd_machine_init(MachineClass *mc)
+{
+    mc->desc = "MIPS AR7 with AMD flash";
+    mc->init = ar7_amd_init;
+    mc->max_cpus = 1;
+}
+
+DEFINE_MACHINE("ar7-amd", ar7_amd_machine_init)
+
+static void tnetd7200_machine_init(MachineClass *mc)
+{
+    mc->desc = "MIPS 4KEc / TNETD7200 platform";
+    mc->init = mips_tnetd7200_init;
+    mc->max_cpus = 1;
+}
+
+DEFINE_MACHINE("tnetd7200", tnetd7200_machine_init)
+
+static void tnetd7300_machine_init(MachineClass *mc)
+{
+    mc->desc = "MIPS 4KEc / TNETD7300 platform";
+    mc->init = mips_tnetd7300_init;
+    mc->max_cpus = 1;
+}
+
+DEFINE_MACHINE("tnetd7300", tnetd7300_machine_init)
+
 #if defined(TARGET_WORDS_BIGENDIAN)
-  {
-    .name = "zyxel",
-    .desc = "Zyxel 2 MiB flash (AR7 platform)",
-    .init = zyxel_init,
-  },
+
+static void zyxel_machine_init(MachineClass *mc)
+{
+    mc->desc = "Zyxel 2 MiB flash (AR7 platform)";
+    mc->init = zyxel_init;
+    mc->max_cpus = 1;
+}
+
+DEFINE_MACHINE("zyxel", zyxel_machine_init)
+
 #else
-  {
-    .name = "fbox-4mb",
-    .desc = "FBox 4 MiB flash (AR7 platform)",
-    .init = fbox4_init,
-  },
-  {
-    .name = "fbox-8mb",
-    .desc = "FBox 8 MiB flash (AR7 platform)",
-    .init = fbox8_init,
-  },
-  {
-    .name = "sinus-basic-se",
-    .desc = "Sinus DSL Basic SE (AR7 platform)",
-    .init = sinus_basic_se_init,
-  },
-  {
-    .name = "sinus-se",
-    .desc = "Sinus DSL SE (AR7 platform)",
-    .init = sinus_se_init,
-  },
-  {
-    .name = "sinus-basic-3",
-    .desc = "Sinus DSL Basic 3 (AR7 platform)",
-    .init = sinus_basic_3_init,
-  },
-  {
-    .name = "speedport",
-    .desc = "Speedport (AR7 platform)",
-    .init = speedport_init,
-  },
+
+static void fbox_4mb_machine_init(MachineClass *mc)
+{
+    mc->desc = "FBox 4 MiB flash (AR7 platform)";
+    mc->init = fbox4_init;
+    mc->max_cpus = 1;
+}
+
+DEFINE_MACHINE("fbox-4mb", fbox_4mb_machine_init)
+
+static void fbox_8mb_machine_init(MachineClass *mc)
+{
+    mc->desc = "FBox 8 MiB flash (AR7 platform)";
+    mc->init = fbox8_init;
+    mc->max_cpus = 1;
+}
+
+DEFINE_MACHINE("fbox-8mb", fbox_8mb_machine_init)
+
+static void sinus_basic_se_machine_init(MachineClass *mc)
+{
+    mc->desc = "Sinus DSL Basic SE (AR7 platform)";
+    mc->init = sinus_basic_se_init;
+    mc->max_cpus = 1;
+}
+
+DEFINE_MACHINE("sinus-basic-se", sinus_basic_se_machine_init)
+
+static void sinus_se_machine_init(MachineClass *mc)
+{
+    mc->desc = "Sinus DSL SE (AR7 platform)";
+    mc->init = sinus_se_init;
+    mc->max_cpus = 1;
+}
+
+DEFINE_MACHINE("sinus-se", sinus_se_machine_init)
+
+static void sinus_basic_3_machine_init(MachineClass *mc)
+{
+    mc->desc = "Sinus DSL Basic 3 (AR7 platform)";
+    mc->init = sinus_basic_3_init;
+    mc->max_cpus = 1;
+}
+
+DEFINE_MACHINE("sinus-basic-3", sinus_basic_3_machine_init)
+
+static void speedport_machine_init(MachineClass *mc)
+{
+    mc->desc = "Speedport (AR7 platform)";
+    mc->init = speedport_init;
+    mc->max_cpus = 1;
+}
+
+DEFINE_MACHINE("speedport", speedport_machine_init)
+
 #endif
-};
 
 static const VMStateDescription vmstate_ar7 = {
     .name ="ar7",
@@ -4276,23 +4320,12 @@ static const TypeInfo ar7_cpmac_info = {
     .class_init = ar7_cpmac_class_init
 };
 
-static void ar7_machine_init(void)
-{
-    size_t i;
-    for (i = 0; i < ARRAY_SIZE(ar7_machines); i++) {
-        QEMUMachine *machine = &ar7_machines[i];
-        machine->max_cpus = 1;
-        qemu_register_machine(machine);
-    }
-}
-
 static void ar7_register_types(void)
 {
     type_register_static(&ar7_info);
     type_register_static(&ar7_cpmac_info);
 }
 
-machine_init(ar7_machine_init);
 type_init(ar7_register_types);
 
 /* eof */

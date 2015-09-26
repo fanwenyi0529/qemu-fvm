@@ -404,17 +404,12 @@ void stcb_exit()
 }
 #endif
 
-static QEMUMachine a9m2410_machine = {
-    .name = "a9m2410",
-    .desc = "Digi A9M2410 (S3C2410A, ARM920T)",
-    .init = stcb_init,
-    //~ .exit = stcb_exit,
-    .max_cpus = 1,
+static void a9m2410_machine_init(MachineClass *mc)
+{
+    mc->desc = "Digi A9M2410 (S3C2410A, ARM920T)";
+    mc->init = stcb_init;
+    //~ mc->exit = stcb_exit,
+    mc->max_cpus = 1,
 };
 
-static void a9m2410_machine_init(void)
-{
-    qemu_register_machine(&a9m2410_machine);
-}
-
-machine_init(a9m2410_machine_init);
+DEFINE_MACHINE("a9m2410", a9m2410_machine_init)

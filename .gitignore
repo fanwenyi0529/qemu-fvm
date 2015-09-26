@@ -19,7 +19,6 @@
 /trace/generated-ust.c
 /ui/shader/texture-blit-frag.h
 /ui/shader/texture-blit-vert.h
-/libcacard/trace/generated-tracers.c
 *-timestamp
 /*-softmmu
 /*-darwin-user
@@ -34,6 +33,7 @@
 /qapi-visit.[ch]
 /qapi-event.[ch]
 /qmp-commands.h
+/qmp-introspect.[ch]
 /qmp-marshal.c
 /qemu-doc.html
 /qemu-tech.html

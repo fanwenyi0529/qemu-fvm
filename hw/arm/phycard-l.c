@@ -80,15 +80,10 @@ static void phycard_init(MachineState *machine)
     arm_load_kernel(cpu, &phycard_binfo);
 }
 
-static QEMUMachine phycard_machine = {
-    .name = "phycard-l",
-    .desc = "phyCARD-L (ARM Cortex-A8)",
-    .init = phycard_init,
+static void phycard_machine_init(MachineClass *mc)
+{
+    mc->desc = "phyCARD-L (ARM Cortex-A8)";
+    mc->init = phycard_init;
 };
 
-static void phycard_machine_init(void)
-{
-    qemu_register_machine(&phycard_machine);
-}
-
-machine_init(phycard_machine_init);
+DEFINE_MACHINE("phycard-l", phycard_machine_init)

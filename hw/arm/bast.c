@@ -544,16 +544,11 @@ static void stcb_init(MachineState *machine)
 #endif
 }
 
-static QEMUMachine bast_machine = {
-    .name = "bast",
-    .desc = "Simtec Electronics BAST (S3C2410A, ARM920T)",
-    .init = stcb_init,
-    .max_cpus = 1,
+static void bast_machine_init(MachineClass *mc)
+{
+    mc->desc = "Simtec Electronics BAST (S3C2410A, ARM920T)";
+    mc->init = stcb_init;
+    mc->max_cpus = 1;
 };
 
-static void bast_machine_init(void)
-{
-    qemu_register_machine(&bast_machine);
-}
-
-machine_init(bast_machine_init);
+DEFINE_MACHINE("bast", bast_machine_init)

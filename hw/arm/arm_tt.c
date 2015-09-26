@@ -1042,32 +1042,29 @@ static void tt_init_smdk2443(MachineState *machine)
     tt_init(machine);
 }
 
-static QEMUMachine tt_machine = {
-    .name = "tt",
-    .desc = "OpenTom (ARM920-T)",
-    .init = tt_init_go,
-};
-
-static QEMUMachine tt_machine_666 = {
-    .name = "tt666",
-    .desc = "OpenTom (ARM920-T)",
-    .init = tt_init_666,
-};
-
-static QEMUMachine tt_machine_smdk2443 = {
-    .name = "smdk2443",
-    .desc = "smdk2443 (ARM920-T)",
-    .init = tt_init_smdk2443,
-};
-
-static void tt_machine_init(void)
+static void tt_machine_init(MachineClass *mc)
 {
-    qemu_register_machine(&tt_machine);
-    qemu_register_machine(&tt_machine_666);
-    qemu_register_machine(&tt_machine_smdk2443);
-}
+    mc->desc = "OpenTom (ARM920-T)";
+    mc->init = tt_init_go;
+};
 
-machine_init(tt_machine_init);
+DEFINE_MACHINE("tt", tt_machine_init)
+
+static void tt_machine_666_init(MachineClass *mc)
+{
+    mc->desc = "OpenTom (ARM920-T)";
+    mc->init = tt_init_666;
+};
+
+DEFINE_MACHINE("tt666", tt_machine_666_init)
+
+static void tt_machine_smdk2443_init(MachineClass *mc)
+{
+    mc->desc = "smdk2443 (ARM920-T)";
+    mc->init = tt_init_smdk2443;
+};
+
+DEFINE_MACHINE("smdk2443", tt_machine_smdk2443_init)
 
 static void tt_register_types(void)
 {
