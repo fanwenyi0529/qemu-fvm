@@ -39,7 +39,9 @@
 #endif
 
 #ifdef CONFIG_SDL
-#if defined(__APPLE__) || defined(main)
+#ifdef CONFIG_WIN32
+#undef main
+#elif defined(__APPLE__) || defined(main)
 #include <SDL.h>
 int qemu_main(int argc, char **argv);
 int main(int argc, char **argv)
