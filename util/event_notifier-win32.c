@@ -31,9 +31,9 @@ HANDLE event_notifier_get_handle(EventNotifier *e)
     return e->event;
 }
 
-int event_notifier_get_fd(EventNotifier *e)
+__u64 event_notifier_get_fd(EventNotifier *e)
 {
-    return (int)event_notifier_get_handle(e);
+    return (__u64)e->event;
 }
 
 int event_notifier_set_handler(EventNotifier *e,

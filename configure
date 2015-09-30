@@ -3519,6 +3519,10 @@ if compile_prog "" "" ; then
   eventfd=yes
 fi
 
+if test "$mingw32" = "yes" ; then
+  eventfd=yes
+fi
+
 # check for fallocate
 fallocate=no
 cat > $TMPC << EOF

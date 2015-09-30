@@ -38,7 +38,7 @@
 #include "hw/boards.h"
 
 /* This check must be after config-host.h is included */
-#ifdef CONFIG_EVENTFD
+#if defined(CONFIG_EVENTFD) && !defined(CONFIG_WIN32)
 #include <sys/eventfd.h>
 #endif
 
@@ -269,8 +269,7 @@ int kvm_init_vcpu(CPUState *cpu)
     }
 
     if (s->coalesced_mmio && !s->coalesced_mmio_ring) {
-        s->coalesced_mmio_ring =
-            s->coalesced_mmio_ring = vmmr3_get_coalesced_mmio(s, cpu->kvm_fd, cpu->kvm_run);
+        s->coalesced_mmio_ring = vmmr3_get_coalesced_mmio(s, cpu->kvm_fd, cpu->kvm_run);
     }
 
     ret = kvm_arch_init_vcpu(cpu);
@@ -516,7 +515,13 @@ static uint32_t adjust_ioeventfd_endianness(uint32_t val, uint32_t size)
     return val;
 }
 
-static int kvm_set_ioeventfd_mmio(int fd, hwaddr addr, uint32_t val,
+static int kvm_set_ioeventfd_mmio(
+#ifdef CONFIG_WIN32
+                                  __u64 fd,
+#else
+                                  int fd,
+#endif
+                                  hwaddr addr, uint32_t val,
                                   bool assign, uint32_t size, bool datamatch)
 {
     int ret;
@@ -548,7 +553,13 @@ static int kvm_set_ioeventfd_mmio(int fd, hwaddr addr, uint32_t val,
     return 0;
 }
 
-static int kvm_set_ioeventfd_pio(int fd, uint16_t addr, uint16_t val,
+static int kvm_set_ioeventfd_pio(
+#ifdef CONFIG_WIN32
+                                 __u64 fd,
+#else
+                                 int fd,
+#endif
+                                 uint16_t addr, uint16_t val,
                                  bool assign, uint32_t size, bool datamatch)
 {
     struct kvm_ioeventfd kick = {
@@ -575,7 +586,38 @@ static int kvm_set_ioeventfd_pio(int fd, uint16_t addr, uint16_t val,
     return 0;
 }
 
+#ifdef CONFIG_WIN32
+static int kvm_check_many_ioeventfds(void)
+{
+#if defined(CONFIG_EVENTFD)
+    HANDLE ioeventfds[7];
 
+    int i, ret = 0;
+    for (i = 0; i < ARRAY_SIZE(ioeventfds); i++) {
+        ioeventfds[i] = CreateEvent(NULL, false, false, NULL);
+        if (!ioeventfds[i]) {
+            break;
+        }
+        ret = kvm_set_ioeventfd_pio((__u64)ioeventfds[i], 0, i, true, 2, true);
+        if (ret < 0) {
+            CloseHandle(ioeventfds[i]);
+            break;
+        }
+    }
+
+    /* Decide whether many devices are supported or not */
+    ret = i == ARRAY_SIZE(ioeventfds);
+
+    while (i-- > 0) {
+        kvm_set_ioeventfd_pio((__u64)ioeventfds[i], 0, i, false, 2, true);
+        CloseHandle(ioeventfds[i]);
+    }
+    return ret;
+#else
+    return 0;
+#endif
+}
+#else
 static int kvm_check_many_ioeventfds(void)
 {
     /* Userspace can use ioeventfd for io notification.  This requires a host
@@ -612,6 +654,7 @@ static int kvm_check_many_ioeventfds(void)
     return 0;
 #endif
 }
+#endif /* CONFIG_WIN32 */
 
 static const KVMCapabilityInfo *
 kvm_check_extension_list(KVMState *s, const KVMCapabilityInfo *list)
@@ -821,7 +864,11 @@ static void kvm_mem_ioeventfd_add(MemoryListener *listener,
                                   bool match_data, uint64_t data,
                                   EventNotifier *e)
 {
+#ifdef CONFIG_WIN32
+    __u64 fd = event_notifier_get_fd(e);
+#else
     int fd = event_notifier_get_fd(e);
+#endif
     int r;
 
     r = kvm_set_ioeventfd_mmio(fd, section->offset_within_address_space,
@@ -839,7 +886,11 @@ static void kvm_mem_ioeventfd_del(MemoryListener *listener,
                                   bool match_data, uint64_t data,
                                   EventNotifier *e)
 {
+#ifdef CONFIG_WIN32
+    __u64 fd = event_notifier_get_fd(e);
+#else
     int fd = event_notifier_get_fd(e);
+#endif
     int r;
 
     r = kvm_set_ioeventfd_mmio(fd, section->offset_within_address_space,
@@ -855,7 +906,11 @@ static void kvm_io_ioeventfd_add(MemoryListener *listener,
                                  bool match_data, uint64_t data,
                                  EventNotifier *e)
 {
+#ifdef CONFIG_WIN32
+    __u64 fd = event_notifier_get_fd(e);
+#else
     int fd = event_notifier_get_fd(e);
+#endif
     int r;
 
     r = kvm_set_ioeventfd_pio(fd, section->offset_within_address_space,
@@ -874,7 +929,11 @@ static void kvm_io_ioeventfd_del(MemoryListener *listener,
                                  EventNotifier *e)
 
 {
+#ifdef CONFIG_WIN32
+    __u64 fd = event_notifier_get_fd(e);
+#else
     int fd = event_notifier_get_fd(e);
+#endif
     int r;
 
     r = kvm_set_ioeventfd_pio(fd, section->offset_within_address_space,
@@ -1248,7 +1307,15 @@ int kvm_irqchip_update_msi_route(KVMState *s, int virq, MSIMessage msg)
     return kvm_update_routing_entry(s, &kroute);
 }
 
-static int kvm_irqchip_assign_irqfd(KVMState *s, int fd, int rfd, int virq,
+static int kvm_irqchip_assign_irqfd(KVMState *s,
+#ifdef CONFIG_WIN32
+                                    __u64 fd,
+                                    __u64 rfd,
+#else
+                                    int fd,
+                                    int rfd,
+#endif
+                                    int virq,
                                     bool assign)
 {
     struct kvm_irqfd irqfd = {

@@ -599,7 +599,11 @@ struct kvm_ioeventfd {
 	__u64 datamatch;
 	__u64 addr;        /* legal pio/mmio address */
 	__u32 len;         /* 1, 2, 4, or 8 bytes; or 0 to ignore length */
+#ifdef CONFIG_WIN32
+	__u64 fd;
+#else
 	__s32 fd;
+#endif
 	__u32 flags;
 	__u8  pad[36];
 };
@@ -904,10 +908,18 @@ struct kvm_xen_hvm_config {
 #define KVM_IRQFD_FLAG_RESAMPLE (1 << 1)
 
 struct kvm_irqfd {
+#ifdef CONFIG_WIN32
+	__u64 fd;
+#else
 	__u32 fd;
+#endif
 	__u32 gsi;
 	__u32 flags;
+#ifdef CONFIG_WIN32
+	__u64 resamplefd;
+#else
 	__u32 resamplefd;
+#endif
 	__u8  pad[16];
 };
 

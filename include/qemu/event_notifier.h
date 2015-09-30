@@ -17,6 +17,7 @@
 
 #ifdef _WIN32
 #include <windows.h>
+#include <vmmr3/win_types.h>
 #endif
 
 struct EventNotifier {
@@ -40,7 +41,7 @@ int event_notifier_set_handler(EventNotifier *, EventNotifierHandler *);
 void event_notifier_init_fd(EventNotifier *, int fd);
 int event_notifier_get_fd(EventNotifier *);
 #else
-int event_notifier_get_fd(EventNotifier *);
+__u64 event_notifier_get_fd(EventNotifier *);
 HANDLE event_notifier_get_handle(EventNotifier *);
 #endif
 
