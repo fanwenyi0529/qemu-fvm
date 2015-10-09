@@ -27,6 +27,9 @@
 #include "exec/address-spaces.h"
 #include "qemu/rcu.h"
 #include "exec/tb-hash.h"
+#if defined(TARGET_I386) && !defined(CONFIG_USER_ONLY)
+#include "hw/i386/apic.h"
+#endif
 
 #if defined(_WIN64)
 /* On w64, sigsetjmp is implemented by _setjmp which needs a second parameter.
@@ -351,6 +354,12 @@ int cpu_exec(CPUState *cpu)
     SyncClocks sc;
 
     if (cpu->halted) {
+#if defined(TARGET_I386) && !defined(CONFIG_USER_ONLY)
+        if (cpu->interrupt_request & CPU_INTERRUPT_POLL) {
+            apic_poll_irq(x86_cpu->apic_state);
+            cpu_reset_interrupt(cpu, CPU_INTERRUPT_POLL);
+        }
+#endif
         if (!cpu_has_work(cpu)) {
             return EXCP_HALTED;
         }

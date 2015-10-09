@@ -60,6 +60,7 @@ typedef struct VRingUsed
 typedef struct VRing
 {
     unsigned int num;
+    unsigned int num_default;
     unsigned int align;
     hwaddr desc;
     hwaddr avail;
@@ -243,13 +244,11 @@ int virtio_queue_empty(VirtQueue *vq)
     return vring_avail_idx(vq) == vq->last_avail_idx;
 }
 
-void virtqueue_fill(VirtQueue *vq, const VirtQueueElement *elem,
-                    unsigned int len, unsigned int idx)
+static void virtqueue_unmap_sg(VirtQueue *vq, const VirtQueueElement *elem,
+                               unsigned int len)
 {
     unsigned int offset;
     int i;
-
-    trace_virtqueue_fill(vq, elem, len, idx);
 
     offset = 0;
     for (i = 0; i < elem->in_num; i++) {
@@ -266,6 +265,21 @@ void virtqueue_fill(VirtQueue *vq, const VirtQueueElement *elem,
         cpu_physical_memory_unmap(elem->out_sg[i].iov_base,
                                   elem->out_sg[i].iov_len,
                                   0, elem->out_sg[i].iov_len);
+}
+
+void virtqueue_discard(VirtQueue *vq, const VirtQueueElement *elem,
+                       unsigned int len)
+{
+    vq->last_avail_idx--;
+    virtqueue_unmap_sg(vq, elem, len);
+}
+
+void virtqueue_fill(VirtQueue *vq, const VirtQueueElement *elem,
+                    unsigned int len, unsigned int idx)
+{
+    trace_virtqueue_fill(vq, elem, len, idx);
+
+    virtqueue_unmap_sg(vq, elem, len);
 
     idx = (idx + vring_used_idx(vq)) % vq->vring.num;
 
@@ -633,6 +647,7 @@ void virtio_reset(void *opaque)
         vdev->vq[i].signalled_used = 0;
         vdev->vq[i].signalled_used_valid = false;
         vdev->vq[i].notification = true;
+        vdev->vq[i].vring.num = vdev->vq[i].vring.num_default;
     }
 }
 
@@ -964,6 +979,7 @@ VirtQueue *virtio_add_queue(VirtIODevice *vdev, int queue_size,
         abort();
 
     vdev->vq[i].vring.num = queue_size;
+    vdev->vq[i].vring.num_default = queue_size;
     vdev->vq[i].vring.align = VIRTIO_PCI_VRING_ALIGN;
     vdev->vq[i].handle_output = handle_output;
 
@@ -977,6 +993,7 @@ void virtio_del_queue(VirtIODevice *vdev, int n)
     }
 
     vdev->vq[n].vring.num = 0;
+    vdev->vq[n].vring.num_default = 0;
 }
 
 void virtio_irq(VirtQueue *vq)
@@ -1056,6 +1073,19 @@ static bool virtio_virtqueue_needed(void *opaque)
     return virtio_host_has_feature(vdev, VIRTIO_F_VERSION_1);
 }
 
+static bool virtio_ringsize_needed(void *opaque)
+{
+    VirtIODevice *vdev = opaque;
+    int i;
+
+    for (i = 0; i < VIRTIO_QUEUE_MAX; i++) {
+        if (vdev->vq[i].vring.num != vdev->vq[i].vring.num_default) {
+            return true;
+        }
+    }
+    return false;
+}
+
 static void put_virtqueue_state(QEMUFile *f, void *pv, size_t size)
 {
     VirtIODevice *vdev = pv;
@@ -1104,6 +1134,52 @@ static const VMStateDescription vmstate_virtio_virtqueues = {
     }
 };
 
+static void put_ringsize_state(QEMUFile *f, void *pv, size_t size)
+{
+    VirtIODevice *vdev = pv;
+    int i;
+
+    for (i = 0; i < VIRTIO_QUEUE_MAX; i++) {
+        qemu_put_be32(f, vdev->vq[i].vring.num_default);
+    }
+}
+
+static int get_ringsize_state(QEMUFile *f, void *pv, size_t size)
+{
+    VirtIODevice *vdev = pv;
+    int i;
+
+    for (i = 0; i < VIRTIO_QUEUE_MAX; i++) {
+        vdev->vq[i].vring.num_default = qemu_get_be32(f);
+    }
+    return 0;
+}
+
+static VMStateInfo vmstate_info_ringsize = {
+    .name = "ringsize_state",
+    .get = get_ringsize_state,
+    .put = put_ringsize_state,
+};
+
+static const VMStateDescription vmstate_virtio_ringsize = {
+    .name = "virtio/ringsize",
+    .version_id = 1,
+    .minimum_version_id = 1,
+    .needed = &virtio_ringsize_needed,
+    .fields = (VMStateField[]) {
+        {
+            .name         = "ringsize",
+            .version_id   = 0,
+            .field_exists = NULL,
+            .size         = 0,
+            .info         = &vmstate_info_ringsize,
+            .flags        = VMS_SINGLE,
+            .offset       = 0,
+        },
+        VMSTATE_END_OF_LIST()
+    }
+};
+
 static const VMStateDescription vmstate_virtio_device_endian = {
     .name = "virtio/device_endian",
     .version_id = 1,
@@ -1138,6 +1214,7 @@ static const VMStateDescription vmstate_virtio = {
         &vmstate_virtio_device_endian,
         &vmstate_virtio_64bit_features,
         &vmstate_virtio_virtqueues,
+        &vmstate_virtio_ringsize,
         NULL
     }
 };
@@ -1460,7 +1537,7 @@ hwaddr virtio_queue_get_desc_size(VirtIODevice *vdev, int n)
 hwaddr virtio_queue_get_avail_size(VirtIODevice *vdev, int n)
 {
     return offsetof(VRingAvail, ring) +
-        sizeof(uint64_t) * vdev->vq[n].vring.num;
+        sizeof(uint16_t) * vdev->vq[n].vring.num;
 }
 
 hwaddr virtio_queue_get_used_size(VirtIODevice *vdev, int n)

@@ -29,8 +29,6 @@
 
 #include "exec/cpu-defs.h"
 
-#define ELF_MACHINE	EM_CRIS
-
 #define EXCP_NMI        1
 #define EXCP_GURU       2
 #define EXCP_BUSFAULT   3
@@ -225,7 +223,6 @@ enum {
 #define cpu_init(cpu_model) CPU(cpu_cris_init(cpu_model))
 
 #define cpu_exec cpu_cris_exec
-#define cpu_gen_code cpu_cris_gen_code
 #define cpu_signal_handler cpu_cris_signal_handler
 
 /* MMU modes definitions */

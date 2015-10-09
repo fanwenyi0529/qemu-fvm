@@ -26,10 +26,8 @@
 #if defined(TARGET_AARCH64)
   /* AArch64 definitions */
 #  define TARGET_LONG_BITS 64
-#  define ELF_MACHINE EM_AARCH64
 #else
 #  define TARGET_LONG_BITS 32
-#  define ELF_MACHINE EM_ARM
 #endif
 
 #define TARGET_IS_BIENDIAN 1
@@ -97,6 +95,7 @@
 struct arm_boot_info;
 
 #define NB_MMU_MODES 7
+#define TARGET_INSN_START_EXTRA_WORDS 1
 
 /* We currently assume float and double are IEEE single and double
    precision respectively.
@@ -1608,7 +1607,6 @@ static inline bool arm_excp_unmasked(CPUState *cs, unsigned int excp_idx,
 #define cpu_init(cpu_model) CPU(cpu_arm_init(cpu_model))
 
 #define cpu_exec cpu_arm_exec
-#define cpu_gen_code cpu_arm_gen_code
 #define cpu_signal_handler cpu_arm_signal_handler
 #define cpu_list arm_cpu_list
 

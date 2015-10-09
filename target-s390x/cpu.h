@@ -27,7 +27,6 @@
 
 #define TARGET_LONG_BITS 64
 
-#define ELF_MACHINE	EM_S390
 #define ELF_MACHINE_UNAME "S390X"
 
 #define CPUArchState struct CPUS390XState
@@ -43,6 +42,7 @@
 #include "fpu/softfloat.h"
 
 #define NB_MMU_MODES 3
+#define TARGET_INSN_START_EXTRA_WORDS 1
 
 #define MMU_MODE0_SUFFIX _primary
 #define MMU_MODE1_SUFFIX _secondary
@@ -569,7 +569,7 @@ void cpu_unlock(void);
 typedef struct SubchDev SubchDev;
 
 #ifndef CONFIG_USER_ONLY
-extern void io_subsystem_reset(void);
+extern void subsystem_reset(void);
 SubchDev *css_find_subch(uint8_t m, uint8_t cssid, uint8_t ssid,
                          uint16_t schid);
 bool css_subch_visible(SubchDev *sch);
@@ -598,7 +598,6 @@ bool css_present(uint8_t cssid);
 
 #define cpu_init(model) CPU(cpu_s390x_init(model))
 #define cpu_exec cpu_s390x_exec
-#define cpu_gen_code cpu_s390x_gen_code
 #define cpu_signal_handler cpu_s390x_signal_handler
 
 void s390_cpu_list(FILE *f, fprintf_function cpu_fprintf);

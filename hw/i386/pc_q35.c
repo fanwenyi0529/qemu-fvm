@@ -43,7 +43,6 @@
 #include "hw/ide/pci.h"
 #include "hw/ide/ahci.h"
 #include "hw/usb.h"
-#include "hw/cpu/icc_bus.h"
 #include "qemu/error-report.h"
 #include "migration/migration.h"
 
@@ -83,7 +82,6 @@ static void pc_q35_init(MachineState *machine)
     int i;
     ICH9LPCState *ich9_lpc;
     PCIDevice *ahci;
-    DeviceState *icc_bridge;
     PcGuestInfo *guest_info;
     ram_addr_t lowmem;
     DriveInfo *hd[MAX_SATA_PORTS];
@@ -130,11 +128,7 @@ static void pc_q35_init(MachineState *machine)
         exit(1);
     }
 
-    icc_bridge = qdev_create(NULL, TYPE_ICC_BRIDGE);
-    object_property_add_child(qdev_get_machine(), "icc-bridge",
-                              OBJECT(icc_bridge), NULL);
-
-    pc_cpus_init(machine->cpu_model, icc_bridge);
+    pc_cpus_init(machine->cpu_model);
     pc_acpi_init("q35-acpi-dsdt.aml");
 
     kvmclock_create();
@@ -236,7 +230,6 @@ static void pc_q35_init(MachineState *machine)
     if (pci_enabled) {
         ioapic_init_gsi(gsi_state, "q35");
     }
-    qdev_init_nofail(icc_bridge);
 
     pc_register_ferr_irq(gsi[13]);
 
@@ -284,6 +277,13 @@ static void pc_q35_init(MachineState *machine)
     }
 }
 
+/* Looking for a pc_compat_2_4() function? It doesn't exist.
+ * pc_compat_*() functions that run on machine-init time and
+ * change global QEMU state are deprecated. Please don't create
+ * one, and implement any pc-*-2.4 (and newer) compat code in
+ * HW_COMPAT_*, PC_COMPAT_*, or * pc_*_machine_options().
+ */
+
 static void pc_compat_2_3(MachineState *machine)
 {
     PCMachineState *pcms = PC_MACHINE(machine);
@@ -309,7 +309,7 @@ static void pc_compat_2_1(MachineState *machine)
     pc_compat_2_2(machine);
     pcms->enforce_aligned_dimm = false;
     smbios_uuid_encoded = false;
-    x86_cpu_compat_kvm_no_autodisable(FEAT_8000_0001_ECX, CPUID_EXT3_SVM);
+    x86_cpu_change_kvm_default("svm", NULL);
 }
 
 static void pc_compat_2_0(MachineState *machine)
@@ -326,7 +326,7 @@ static void pc_compat_1_7(MachineState *machine)
     smbios_defaults = false;
     gigabyte_align = false;
     option_rom_has_mr = true;
-    x86_cpu_compat_kvm_no_autoenable(FEAT_1_ECX, CPUID_EXT_X2APIC);
+    x86_cpu_change_kvm_default("x2apic", NULL);
 }
 
 static void pc_compat_1_6(MachineState *machine)
@@ -364,18 +364,29 @@ static void pc_q35_machine_options(MachineClass *m)
     m->desc = "Standard PC (Q35 + ICH9, 2009)";
     m->hot_add_cpu = pc_hot_add_cpu;
     m->units_per_default_bus = 1;
-}
-
-static void pc_q35_2_4_machine_options(MachineClass *m)
-{
-    PCMachineClass *pcmc = PC_MACHINE_CLASS(m);
-    pc_q35_machine_options(m);
-    pcmc->broken_reserved_end = true;
     m->default_machine_opts = "firmware=bios-256k.bin";
     m->default_display = "std";
     m->no_floppy = 1;
     m->no_tco = 0;
+}
+
+static void pc_q35_2_5_machine_options(MachineClass *m)
+{
+    pc_q35_machine_options(m);
     m->alias = "q35";
+}
+
+DEFINE_Q35_MACHINE(v2_5, "pc-q35-2.5", NULL,
+                   pc_q35_2_5_machine_options);
+
+static void pc_q35_2_4_machine_options(MachineClass *m)
+{
+    PCMachineClass *pcmc = PC_MACHINE_CLASS(m);
+    pc_q35_2_5_machine_options(m);
+    m->alias = NULL;
+    pcmc->broken_reserved_end = true;
+    pcmc->inter_dimm_gap = false;
+    SET_MACHINE_COMPAT(m, PC_COMPAT_2_4);
 }
 
 DEFINE_Q35_MACHINE(v2_4, "pc-q35-2.4", NULL,

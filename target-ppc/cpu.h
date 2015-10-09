@@ -81,9 +81,9 @@
 #include "fpu/softfloat.h"
 
 #if defined (TARGET_PPC64)
-#define ELF_MACHINE     EM_PPC64
+#define PPC_ELF_MACHINE     EM_PPC64
 #else
-#define ELF_MACHINE     EM_PPC
+#define PPC_ELF_MACHINE     EM_PPC
 #endif
 
 /*****************************************************************************/
@@ -1241,7 +1241,6 @@ int ppc_dcr_write (ppc_dcr_t *dcr_env, int dcrn, uint32_t val);
 #define cpu_init(cpu_model) CPU(cpu_ppc_init(cpu_model))
 
 #define cpu_exec cpu_ppc_exec
-#define cpu_gen_code cpu_ppc_gen_code
 #define cpu_signal_handler cpu_ppc_signal_handler
 #define cpu_list ppc_cpu_list
 

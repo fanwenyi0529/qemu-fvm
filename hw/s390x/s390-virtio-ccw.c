@@ -35,7 +35,7 @@ typedef struct S390CcwMachineState {
     bool dea_key_wrap;
 } S390CcwMachineState;
 
-void io_subsystem_reset(void)
+void subsystem_reset(void)
 {
     DeviceState *css, *sclp, *flic, *diag288;
 
@@ -242,6 +242,26 @@ static const TypeInfo ccw_machine_info = {
             .driver   = TYPE_S390_SKEYS,\
             .property = "migration-enabled",\
             .value    = "off",\
+        },{\
+            .driver   = "virtio-blk-ccw",\
+            .property = "max_revision",\
+            .value    = "0",\
+        },{\
+            .driver   = "virtio-balloon-ccw",\
+            .property = "max_revision",\
+            .value    = "0",\
+        },{\
+            .driver   = "virtio-serial-ccw",\
+            .property = "max_revision",\
+            .value    = "0",\
+        },{\
+            .driver   = "virtio-9p-ccw",\
+            .property = "max_revision",\
+            .value    = "0",\
+        },{\
+            .driver   = "virtio-rng-ccw",\
+            .property = "max_revision",\
+            .value    = "0",\
         },
 
 static void ccw_machine_2_4_class_init(ObjectClass *oc, void *data)

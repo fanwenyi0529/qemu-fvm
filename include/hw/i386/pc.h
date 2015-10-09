@@ -60,6 +60,7 @@ struct PCMachineClass {
 
     /*< public >*/
     bool broken_reserved_end;
+    bool inter_dimm_gap;
     HotplugHandler *(*get_hotplug_handler)(MachineState *machine,
                                            DeviceState *dev);
 };
@@ -123,6 +124,11 @@ int pic_get_output(DeviceState *d);
 void hmp_info_pic(Monitor *mon, const QDict *qdict);
 void hmp_info_irq(Monitor *mon, const QDict *qdict);
 
+/* ioapic.c */
+
+void kvm_ioapic_dump_state(Monitor *mon, const QDict *qdict);
+void ioapic_dump_state(Monitor *mon, const QDict *qdict);
+
 /* Global System Interrupts */
 
 #define GSI_NUM_PINS IOAPIC_NUM_PINS
@@ -162,7 +168,7 @@ bool pc_machine_is_smm_enabled(PCMachineState *pcms);
 void pc_register_ferr_irq(qemu_irq irq);
 void pc_acpi_smi_interrupt(void *opaque, int irq, int level);
 
-void pc_cpus_init(const char *cpu_model, DeviceState *icc_bridge);
+void pc_cpus_init(const char *cpu_model);
 void pc_hot_add_cpu(const int64_t id, Error **errp);
 void pc_acpi_init(const char *default_dsdt);
 
@@ -291,7 +297,31 @@ int e820_add_entry(uint64_t, uint64_t, uint32_t);
 int e820_get_num_entries(void);
 bool e820_get_entry(int, uint32_t, uint64_t *, uint64_t *);
 
+#define PC_COMPAT_2_4 \
+        HW_COMPAT_2_4 \
+        {\
+            .driver   = "Haswell-" TYPE_X86_CPU,\
+            .property = "abm",\
+            .value    = "off",\
+        },\
+        {\
+            .driver   = "Haswell-noTSX-" TYPE_X86_CPU,\
+            .property = "abm",\
+            .value    = "off",\
+        },\
+        {\
+            .driver   = "Broadwell-" TYPE_X86_CPU,\
+            .property = "abm",\
+            .value    = "off",\
+        },\
+        {\
+            .driver   = "Broadwell-noTSX-" TYPE_X86_CPU,\
+            .property = "abm",\
+            .value    = "off",\
+        },
+
 #define PC_COMPAT_2_3 \
+        PC_COMPAT_2_4 \
         HW_COMPAT_2_3 \
         {\
             .driver   = TYPE_X86_CPU,\

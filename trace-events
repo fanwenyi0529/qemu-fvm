@@ -69,6 +69,7 @@ bdrv_aio_write_zeroes(void *bs, int64_t sector_num, int nb_sectors, int flags, v
 bdrv_lock_medium(void *bs, bool locked) "bs %p locked %d"
 bdrv_co_readv(void *bs, int64_t sector_num, int nb_sector) "bs %p sector_num %"PRId64" nb_sectors %d"
 bdrv_co_copy_on_readv(void *bs, int64_t sector_num, int nb_sector) "bs %p sector_num %"PRId64" nb_sectors %d"
+bdrv_co_no_copy_on_readv(void *bs, int64_t sector_num, int nb_sector) "bs %p sector_num %"PRId64" nb_sectors %d"
 bdrv_co_writev(void *bs, int64_t sector_num, int nb_sector) "bs %p sector_num %"PRId64" nb_sectors %d"
 bdrv_co_write_zeroes(void *bs, int64_t sector_num, int nb_sector, int flags) "bs %p sector_num %"PRId64" nb_sectors %d flags %#x"
 bdrv_co_io_em(void *bs, int64_t sector_num, int nb_sectors, int is_write, void *acb) "bs %p sector_num %"PRId64" nb_sectors %d is_write %d acb %p"
@@ -1419,6 +1420,8 @@ migrate_transferred(uint64_t tranferred, uint64_t time_spent, double bandwidth, 
 migrate_state_too_big(void) ""
 migrate_global_state_post_load(const char *state) "loaded state: %s"
 migrate_global_state_pre_save(const char *state) "saved state: %s"
+migration_completion_file_err(void) ""
+migration_thread_low_pending(uint64_t pending) "%" PRIu64
 
 # migration/rdma.c
 qemu_rdma_accept_incoming_migration(void) ""
@@ -1439,7 +1442,7 @@ qemu_rdma_exchange_get_response_none(const char *desc, int type) "Surprise: got 
 qemu_rdma_exchange_send_issue_callback(void) ""
 qemu_rdma_exchange_send_waiting(const char *desc) "Waiting for response %s"
 qemu_rdma_exchange_send_received(const char *desc) "Response %s received."
-qemu_rdma_fill(int64_t control_len, int size) "RDMA %" PRId64 " of %d bytes already in buffer"
+qemu_rdma_fill(size_t control_len, size_t size) "RDMA %zd of %zd bytes already in buffer"
 qemu_rdma_init_ram_blocks(int blocks) "Allocated %d local ram block structures"
 qemu_rdma_poll_recv(const char *compstr, int64_t comp, int64_t id, int sent) "completion %s #%" PRId64 " received (%" PRId64 ") left %d"
 qemu_rdma_poll_write(const char *compstr, int64_t comp, int left, uint64_t block, uint64_t chunk, void *local, void *remote) "completions %s (%" PRId64 ") left %d, block %" PRIu64 ", chunk: %" PRIu64 " %p %p"
@@ -1621,7 +1624,9 @@ vfio_platform_intp_interrupt(int pin, int fd) "Inject IRQ #%d (fd = %d)"
 vfio_platform_intp_inject_pending_lockheld(int pin, int fd) "Inject pending IRQ #%d (fd = %d)"
 vfio_platform_populate_interrupts(int pin, int count, int flags) "- IRQ index %d: count %d, flags=0x%x"
 vfio_intp_interrupt_set_pending(int index) "irq %d is set PENDING"
-vfio_platform_start_irqfd_injection(int index, int fd, int resamplefd) "IRQ index=%d, fd = %d, resamplefd = %d"
+vfio_platform_start_level_irqfd_injection(int index, int fd, int resamplefd) "IRQ index=%d, fd = %d, resamplefd = %d"
+vfio_platform_start_edge_irqfd_injection(int index, int fd) "IRQ index=%d, fd = %d"
+
 
 #hw/acpi/memory_hotplug.c
 mhp_acpi_invalid_slot_selected(uint32_t slot) "0x%"PRIx32

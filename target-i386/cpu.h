@@ -37,10 +37,10 @@
 #define TARGET_HAS_PRECISE_SMC
 
 #ifdef TARGET_X86_64
-#define ELF_MACHINE     EM_X86_64
+#define I386_ELF_MACHINE  EM_X86_64
 #define ELF_MACHINE_UNAME "x86_64"
 #else
-#define ELF_MACHINE     EM_386
+#define I386_ELF_MACHINE  EM_386
 #define ELF_MACHINE_UNAME "i686"
 #endif
 
@@ -796,6 +796,7 @@ typedef struct {
 #define MAX_GP_COUNTERS    (MSR_IA32_PERF_STATUS - MSR_P6_EVNTSEL0)
 
 #define NB_MMU_MODES 3
+#define TARGET_INSN_START_EXTRA_WORDS 1
 
 #define NB_OPMASK_REGS 8
 
@@ -835,6 +836,7 @@ typedef struct CPUX86State {
     BNDReg bnd_regs[4];
     BNDCSReg bndcs_regs;
     uint64_t msr_bndcfgs;
+    uint64_t efer;
 
     /* Beginning of state preserved by INIT (dummy marker).  */
     struct {} start_init_save;
@@ -867,7 +869,6 @@ typedef struct CPUX86State {
     uint32_t sysenter_cs;
     target_ulong sysenter_esp;
     target_ulong sysenter_eip;
-    uint64_t efer;
     uint64_t star;
 
     uint64_t vm_hsave;
@@ -1156,7 +1157,6 @@ static inline int hw_breakpoint_len(unsigned long dr7, int index)
 
 void hw_breakpoint_insert(CPUX86State *env, int index);
 void hw_breakpoint_remove(CPUX86State *env, int index);
-bool check_hw_breakpoints(CPUX86State *env, bool force_dr6_update);
 void breakpoint_handler(CPUState *cs);
 
 /* will be suppressed */
@@ -1191,7 +1191,6 @@ uint64_t cpu_get_tsc(CPUX86State *env);
 #define cpu_init(cpu_model) CPU(cpu_x86_init(cpu_model))
 
 #define cpu_exec cpu_x86_exec
-#define cpu_gen_code cpu_x86_gen_code
 #define cpu_signal_handler cpu_x86_signal_handler
 #define cpu_list x86_cpu_list
 #define cpudef_setup x86_cpudef_setup
@@ -1343,8 +1342,15 @@ void cpu_smm_update(X86CPU *cpu);
 
 void cpu_report_tpr_access(CPUX86State *env, TPRAccess access);
 
-void x86_cpu_compat_kvm_no_autoenable(FeatureWord w, uint32_t features);
-void x86_cpu_compat_kvm_no_autodisable(FeatureWord w, uint32_t features);
+/* Change the value of a KVM-specific default
+ *
+ * If value is NULL, no default will be set and the original
+ * value from the CPU model table will be kept.
+ *
+ * It is valid to call this funciton only for properties that
+ * are already present in the kvm_default_props table.
+ */
+void x86_cpu_change_kvm_default(const char *prop, const char *value);
 
 
 /* Return name of 32-bit register, from a R_* constant */
@@ -1354,5 +1360,8 @@ void enable_compat_apic_id_mode(void);
 
 #define APIC_DEFAULT_ADDRESS 0xfee00000
 #define APIC_SPACE_SIZE      0x100000
+
+void x86_cpu_dump_local_apic_state(CPUState *cs, FILE *f,
+                                   fprintf_function cpu_fprintf, int flags);
 
 #endif /* CPU_I386_H */
