@@ -19,7 +19,7 @@
 #include "block/nbd.h"
 #include "sysemu/block-backend.h"
 
-#include "block/coroutine.h"
+#include "qemu/coroutine.h"
 
 #include <errno.h>
 #include <string.h>
@@ -1005,7 +1005,7 @@ static NBDRequest *nbd_request_get(NBDClient *client)
     client->nb_requests++;
     nbd_update_can_read(client);
 
-    req = g_slice_new0(NBDRequest);
+    req = g_new0(NBDRequest, 1);
     nbd_client_get(client);
     req->client = client;
     return req;
@@ -1018,7 +1018,7 @@ static void nbd_request_put(NBDRequest *req)
     if (req->data) {
         qemu_vfree(req->data);
     }
-    g_slice_free(NBDRequest, req);
+    g_free(req);
 
     client->nb_requests--;
     nbd_update_can_read(client);
@@ -1446,6 +1446,7 @@ static void nbd_set_handlers(NBDClient *client)
 {
     if (client->exp && client->exp->ctx) {
         aio_set_fd_handler(client->exp->ctx, client->sock,
+                           true,
                            client->can_read ? nbd_read : NULL,
                            client->send_coroutine ? nbd_restart_write : NULL,
                            client);
@@ -1455,7 +1456,8 @@ static void nbd_set_handlers(NBDClient *client)
 static void nbd_unset_handlers(NBDClient *client)
 {
     if (client->exp && client->exp->ctx) {
-        aio_set_fd_handler(client->exp->ctx, client->sock, NULL, NULL, NULL);
+        aio_set_fd_handler(client->exp->ctx, client->sock,
+                           true, NULL, NULL, NULL);
     }
 }
 

@@ -15,10 +15,6 @@ block-obj-$(CONFIG_WIN32) += aio-win32.o
 block-obj-y += block/
 block-obj-y += qemu-io-cmds.o
 
-block-obj-y += qemu-coroutine.o qemu-coroutine-lock.o qemu-coroutine-io.o
-block-obj-y += qemu-coroutine-sleep.o
-block-obj-y += coroutine-$(CONFIG_COROUTINE_BACKEND).o
-
 block-obj-m = block/
 
 #######################################################################
@@ -57,6 +53,8 @@ common-obj-$(CONFIG_SPICE) += spice-qemu-char.o
 common-obj-y += audio/
 common-obj-y += hw/
 common-obj-y += accel.o
+
+common-obj-y += replay/
 
 common-obj-y += ui/
 common-obj-y += bt-host.o bt-vhci.o
@@ -108,3 +106,8 @@ target-obj-y += trace/
 # by libqemuutil.a.  These should be moved to a separate .json schema.
 qga-obj-y = qga/
 qga-vss-dll-obj-y = qga/
+
+######################################################################
+# contrib
+ivshmem-client-obj-y = contrib/ivshmem-client/
+ivshmem-server-obj-y = contrib/ivshmem-server/

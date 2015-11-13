@@ -2588,6 +2588,26 @@
     'opts': 'NetClientOptions' } }
 
 ##
+# @NetFilterDirection
+#
+# Indicates whether a netfilter is attached to a netdev's transmit queue or
+# receive queue or both.
+#
+# @all: the filter is attached both to the receive and the transmit
+#       queue of the netdev (default).
+#
+# @rx: the filter is attached to the receive queue of the netdev,
+#      where it will receive packets sent to the netdev.
+#
+# @tx: the filter is attached to the transmit queue of the netdev,
+#      where it will receive packets sent by the netdev.
+#
+# Since 2.5
+##
+{ 'enum': 'NetFilterDirection',
+  'data': [ 'all', 'rx', 'tx' ] }
+
+##
 # @InetSocketAddress
 #
 # Captures a socket address or address range in the Internet namespace.
@@ -3396,6 +3416,17 @@
             'features': 'int' } }
 
 ##
+# @DummyForceArrays
+#
+# Not used by QMP; hack to let us use X86CPUFeatureWordInfoList internally
+#
+# Since 2.5
+##
+{ 'struct': 'DummyForceArrays',
+  'data': { 'unused': ['X86CPUFeatureWordInfo'] } }
+
+
+##
 # @RxState:
 #
 # Packets receiving state
@@ -3845,3 +3876,21 @@
 
 # Rocker ethernet network switch
 { 'include': 'qapi/rocker.json' }
+
+##
+# ReplayMode:
+#
+# Mode of the replay subsystem.
+#
+# @none: normal execution mode. Replay or record are not enabled.
+#
+# @record: record mode. All non-deterministic data is written into the
+#          replay log.
+#
+# @play: replay mode. Non-deterministic data required for system execution
+#        is read from the log.
+#
+# Since: 2.5
+##
+{ 'enum': 'ReplayMode',
+  'data': [ 'none', 'record', 'play' ] }

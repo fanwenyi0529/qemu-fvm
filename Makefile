@@ -148,6 +148,8 @@ dummy := $(call unnest-vars,, \
                 stub-obj-y \
                 util-obj-y \
                 qga-obj-y \
+                ivshmem-client-obj-y \
+                ivshmem-server-obj-y \
                 qga-vss-dll-obj-y \
                 block-obj-y \
                 block-obj-m \
@@ -309,18 +311,15 @@ $(qapi-modules) $(SRC_PATH)/scripts/qapi-introspect.py $(qapi-py)
 QGALIB_GEN=$(addprefix qga/qapi-generated/, qga-qapi-types.h qga-qapi-visit.h qga-qmp-commands.h)
 $(qga-obj-y) qemu-ga.o: $(QGALIB_GEN)
 
-# we require QGA_VSS_PROVIDER files to be built alongside qemu-ga
-# executable since they are shipped together, but we don't want to actually
-# link against them
-qemu-ga$(EXESUF): $(qga-obj-y) libqemuutil.a libqemustub.a $(QGA_VSS_PROVIDER)
-	$(call LINK, $(filter-out $(QGA_VSS_PROVIDER), $^))
+qemu-ga$(EXESUF): $(qga-obj-y) libqemuutil.a libqemustub.a
+	$(call LINK, $^)
 
 ifdef QEMU_GA_MSI_ENABLED
 QEMU_GA_MSI=qemu-ga-$(ARCH).msi
 
 msi: $(QEMU_GA_MSI)
 
-$(QEMU_GA_MSI): qemu-ga.exe
+$(QEMU_GA_MSI): qemu-ga.exe $(QGA_VSS_PROVIDER)
 
 $(QEMU_GA_MSI): config-host.mak
 
@@ -331,6 +330,16 @@ else
 msi:
 	@echo "MSI build not configured or dependency resolution failed (reconfigure with --enable-guest-agent-msi option)"
 endif
+
+ifneq ($(EXESUF),)
+.PHONY: qemu-ga
+qemu-ga: qemu-ga$(EXESUF) $(QGA_VSS_PROVIDER) $(QEMU_GA_MSI)
+endif
+
+ivshmem-client$(EXESUF): $(ivshmem-client-obj-y)
+	$(call LINK, $^)
+ivshmem-server$(EXESUF): $(ivshmem-server-obj-y) libqemuutil.a libqemustub.a
+	$(call LINK, $^)
 
 clean:
 # avoid old build problems by removing potentially incorrect old files

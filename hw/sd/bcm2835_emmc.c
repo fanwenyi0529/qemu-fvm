@@ -5,7 +5,7 @@
 
 #include "qemu/timer.h"
 #include "hw/sysbus.h"
-#include "hw/sd.h"
+#include "hw/sd/sd.h"
 #include "sysemu/blockdev.h"
 
 /*

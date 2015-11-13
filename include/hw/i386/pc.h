@@ -60,7 +60,6 @@ struct PCMachineClass {
 
     /*< public >*/
     bool broken_reserved_end;
-    bool inter_dimm_gap;
     HotplugHandler *(*get_hotplug_handler)(MachineState *machine,
                                            DeviceState *dev);
 };
@@ -168,7 +167,7 @@ bool pc_machine_is_smm_enabled(PCMachineState *pcms);
 void pc_register_ferr_irq(qemu_irq irq);
 void pc_acpi_smi_interrupt(void *opaque, int irq, int level);
 
-void pc_cpus_init(const char *cpu_model);
+void pc_cpus_init(PCMachineState *pcms);
 void pc_hot_add_cpu(const int64_t id, Error **errp);
 void pc_acpi_init(const char *default_dsdt);
 
@@ -318,6 +317,36 @@ bool e820_get_entry(int, uint32_t, uint64_t *, uint64_t *);
             .driver   = "Broadwell-noTSX-" TYPE_X86_CPU,\
             .property = "abm",\
             .value    = "off",\
+        },\
+        {\
+            .driver   = "host" "-" TYPE_X86_CPU,\
+            .property = "host-cache-info",\
+            .value    = "on",\
+        },\
+        {\
+            .driver   = TYPE_X86_CPU,\
+            .property = "check",\
+            .value    = "off",\
+        },\
+        {\
+            .driver   = "qemu64" "-" TYPE_X86_CPU,\
+            .property = "sse4a",\
+            .value    = "on",\
+        },\
+        {\
+            .driver   = "qemu64" "-" TYPE_X86_CPU,\
+            .property = "abm",\
+            .value    = "on",\
+        },\
+        {\
+            .driver   = "qemu64" "-" TYPE_X86_CPU,\
+            .property = "popcnt",\
+            .value    = "on",\
+        },\
+        {\
+            .driver   = "qemu32" "-" TYPE_X86_CPU,\
+            .property = "popcnt",\
+            .value    = "on",\
         },
 
 #define PC_COMPAT_2_3 \

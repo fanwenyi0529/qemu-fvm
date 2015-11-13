@@ -72,6 +72,8 @@ extern int daemon(int, int);
 #include <sys/sysctl.h>
 #endif
 
+#include <qemu/mmap-alloc.h>
+
 int qemu_get_thread_id(void)
 {
 #if defined(__linux__)
@@ -128,10 +130,7 @@ void *qemu_memalign(size_t alignment, size_t size)
 void *qemu_anon_ram_alloc(size_t size, uint64_t *alignment)
 {
     size_t align = QEMU_VMALLOC_ALIGN;
-    size_t total = size + align;
-    void *ptr = mmap(0, total, PROT_NONE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
-    size_t offset = QEMU_ALIGN_UP((uintptr_t)ptr, align) - (uintptr_t)ptr;
-    void *ptr1;
+    void *ptr = qemu_ram_mmap(-1, size, align, false);
 
     if (ptr == MAP_FAILED) {
         return NULL;
@@ -139,23 +138,6 @@ void *qemu_anon_ram_alloc(size_t size, uint64_t *alignment)
 
     if (alignment) {
         *alignment = align;
-    }
-
-    ptr1 = mmap(ptr + offset, size, PROT_READ | PROT_WRITE,
-                MAP_FIXED | MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
-    if (ptr1 == MAP_FAILED) {
-        munmap(ptr, total);
-        return NULL;
-    }
-
-    ptr += offset;
-    total -= offset;
-
-    if (offset > 0) {
-        munmap(ptr - offset, offset);
-    }
-    if (total > size + getpagesize()) {
-        munmap(ptr + size + getpagesize(), total - size - getpagesize());
     }
 
     trace_qemu_anon_ram_alloc(size, ptr);
@@ -171,9 +153,7 @@ void qemu_vfree(void *ptr)
 void qemu_anon_ram_free(void *ptr, size_t size)
 {
     trace_qemu_anon_ram_free(ptr, size);
-    if (ptr) {
-        munmap(ptr, size + getpagesize());
-    }
+    qemu_ram_munmap(ptr, size);
 }
 
 void qemu_set_block(int fd)
@@ -489,4 +469,75 @@ int qemu_read_password(char *buf, int buf_size)
     buf[i] = '\0';
     printf("\n");
     return ret;
+}
+
+
+pid_t qemu_fork(Error **errp)
+{
+    sigset_t oldmask, newmask;
+    struct sigaction sig_action;
+    int saved_errno;
+    pid_t pid;
+
+    /*
+     * Need to block signals now, so that child process can safely
+     * kill off caller's signal handlers without a race.
+     */
+    sigfillset(&newmask);
+    if (pthread_sigmask(SIG_SETMASK, &newmask, &oldmask) != 0) {
+        error_setg_errno(errp, errno,
+                         "cannot block signals");
+        return -1;
+    }
+
+    pid = fork();
+    saved_errno = errno;
+
+    if (pid < 0) {
+        /* attempt to restore signal mask, but ignore failure, to
+         * avoid obscuring the fork failure */
+        (void)pthread_sigmask(SIG_SETMASK, &oldmask, NULL);
+        error_setg_errno(errp, saved_errno,
+                         "cannot fork child process");
+        errno = saved_errno;
+        return -1;
+    } else if (pid) {
+        /* parent process */
+
+        /* Restore our original signal mask now that the child is
+         * safely running. Only documented failures are EFAULT (not
+         * possible, since we are using just-grabbed mask) or EINVAL
+         * (not possible, since we are using correct arguments).  */
+        (void)pthread_sigmask(SIG_SETMASK, &oldmask, NULL);
+    } else {
+        /* child process */
+        size_t i;
+
+        /* Clear out all signal handlers from parent so nothing
+         * unexpected can happen in our child once we unblock
+         * signals */
+        sig_action.sa_handler = SIG_DFL;
+        sig_action.sa_flags = 0;
+        sigemptyset(&sig_action.sa_mask);
+
+        for (i = 1; i < NSIG; i++) {
+            /* Only possible errors are EFAULT or EINVAL The former
+             * won't happen, the latter we expect, so no need to check
+             * return value */
+            (void)sigaction(i, &sig_action, NULL);
+        }
+
+        /* Unmask all signals in child, since we've no idea what the
+         * caller's done with their signal mask and don't want to
+         * propagate that to children */
+        sigemptyset(&newmask);
+        if (pthread_sigmask(SIG_SETMASK, &newmask, NULL) != 0) {
+            Error *local_err = NULL;
+            error_setg_errno(&local_err, errno,
+                             "cannot unblock signals");
+            error_report_err(local_err);
+            _exit(1);
+        }
+    }
+    return pid;
 }

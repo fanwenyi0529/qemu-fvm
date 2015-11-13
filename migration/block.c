@@ -591,7 +591,7 @@ static int64_t get_remaining_dirty(void)
 
 /* Called with iothread lock taken.  */
 
-static void blk_mig_cleanup(void)
+static void block_migration_cleanup(void *opaque)
 {
     BlkMigDevState *bmds;
     BlkMigBlock *blk;
@@ -616,11 +616,6 @@ static void blk_mig_cleanup(void)
         g_free(blk);
     }
     blk_mig_unlock();
-}
-
-static void block_migration_cancel(void *opaque)
-{
-    blk_mig_cleanup();
 }
 
 static int block_save_setup(QEMUFile *f, void *opaque)
@@ -750,7 +745,6 @@ static int block_save_complete(QEMUFile *f, void *opaque)
 
     qemu_put_be64(f, BLK_MIG_FLAG_EOS);
 
-    blk_mig_cleanup();
     return 0;
 }
 
@@ -808,6 +802,11 @@ static int block_load(QEMUFile *f, void *opaque, int version_id)
                 return -EINVAL;
             }
             bs = blk_bs(blk);
+            if (!bs) {
+                fprintf(stderr, "Block device %s has no medium\n",
+                        device_name);
+                return -EINVAL;
+            }
 
             if (bs != bs_prev) {
                 bs_prev = bs;
@@ -880,7 +879,7 @@ static SaveVMHandlers savevm_block_handlers = {
     .save_live_complete = block_save_complete,
     .save_live_pending = block_save_pending,
     .load_state = block_load,
-    .cancel = block_migration_cancel,
+    .cleanup = block_migration_cleanup,
     .is_active = block_is_active,
 };
 

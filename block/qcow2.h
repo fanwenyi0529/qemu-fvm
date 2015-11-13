@@ -26,7 +26,7 @@
 #define BLOCK_QCOW2_H
 
 #include "crypto/cipher.h"
-#include "block/coroutine.h"
+#include "qemu/coroutine.h"
 
 //#define DEBUG_ALLOC
 //#define DEBUG_ALLOC2
@@ -294,8 +294,6 @@ typedef struct BDRVQcow2State {
     char *image_backing_file;
     char *image_backing_format;
 } BDRVQcow2State;
-
-struct QCowAIOCB;
 
 typedef struct Qcow2COWRegion {
     /**

@@ -1154,6 +1154,19 @@ static inline void gen_cmps(DisasContext *s, TCGMemOp ot)
     gen_op_add_reg_T0(s->aflag, R_EDI);
 }
 
+static void gen_bpt_io(DisasContext *s, TCGv_i32 t_port, int ot)
+{
+    if (s->flags & HF_IOBPT_MASK) {
+        TCGv_i32 t_size = tcg_const_i32(1 << ot);
+        TCGv t_next = tcg_const_tl(s->pc - s->cs_base);
+
+        gen_helper_bpt_io(cpu_env, t_port, t_size, t_next);
+        tcg_temp_free_i32(t_size);
+        tcg_temp_free(t_next);
+    }
+}
+
+
 static inline void gen_ins(DisasContext *s, TCGMemOp ot)
 {
     if (s->tb->cflags & CF_USE_ICOUNT) {
@@ -1170,6 +1183,7 @@ static inline void gen_ins(DisasContext *s, TCGMemOp ot)
     gen_op_st_v(s, ot, cpu_T[0], cpu_A0);
     gen_op_movl_T0_Dshift(ot);
     gen_op_add_reg_T0(s->aflag, R_EDI);
+    gen_bpt_io(s, cpu_tmp2_i32, ot);
     if (s->tb->cflags & CF_USE_ICOUNT) {
         gen_io_end();
     }
@@ -1187,9 +1201,9 @@ static inline void gen_outs(DisasContext *s, TCGMemOp ot)
     tcg_gen_andi_i32(cpu_tmp2_i32, cpu_tmp2_i32, 0xffff);
     tcg_gen_trunc_tl_i32(cpu_tmp3_i32, cpu_T[0]);
     gen_helper_out_func(ot, cpu_tmp2_i32, cpu_tmp3_i32);
-
     gen_op_movl_T0_Dshift(ot);
     gen_op_add_reg_T0(s->aflag, R_ESI);
+    gen_bpt_io(s, cpu_tmp2_i32, ot);
     if (s->tb->cflags & CF_USE_ICOUNT) {
         gen_io_end();
     }
@@ -2418,7 +2432,7 @@ static void gen_pusha(DisasContext *s)
 {
     int i;
     gen_op_movl_A0_reg(R_ESP);
-    gen_op_addl_A0_im(-8 << s->dflag);
+    gen_op_addl_A0_im(-(8 << s->dflag));
     if (!s->ss32)
         tcg_gen_ext16u_tl(cpu_A0, cpu_A0);
     tcg_gen_mov_tl(cpu_T[1], cpu_A0);
@@ -6269,6 +6283,7 @@ static target_ulong disas_insn(CPUX86State *env, DisasContext *s,
         tcg_gen_movi_i32(cpu_tmp2_i32, val);
         gen_helper_in_func(ot, cpu_T[1], cpu_tmp2_i32);
         gen_op_mov_reg_v(ot, R_EAX, cpu_T[1]);
+        gen_bpt_io(s, cpu_tmp2_i32, ot);
         if (s->tb->cflags & CF_USE_ICOUNT) {
             gen_io_end();
             gen_jmp(s, s->pc - s->cs_base);
@@ -6289,6 +6304,7 @@ static target_ulong disas_insn(CPUX86State *env, DisasContext *s,
         tcg_gen_movi_i32(cpu_tmp2_i32, val);
         tcg_gen_trunc_tl_i32(cpu_tmp3_i32, cpu_T[1]);
         gen_helper_out_func(ot, cpu_tmp2_i32, cpu_tmp3_i32);
+        gen_bpt_io(s, cpu_tmp2_i32, ot);
         if (s->tb->cflags & CF_USE_ICOUNT) {
             gen_io_end();
             gen_jmp(s, s->pc - s->cs_base);
@@ -6306,6 +6322,7 @@ static target_ulong disas_insn(CPUX86State *env, DisasContext *s,
         tcg_gen_trunc_tl_i32(cpu_tmp2_i32, cpu_T[0]);
         gen_helper_in_func(ot, cpu_T[1], cpu_tmp2_i32);
         gen_op_mov_reg_v(ot, R_EAX, cpu_T[1]);
+        gen_bpt_io(s, cpu_tmp2_i32, ot);
         if (s->tb->cflags & CF_USE_ICOUNT) {
             gen_io_end();
             gen_jmp(s, s->pc - s->cs_base);
@@ -6325,6 +6342,7 @@ static target_ulong disas_insn(CPUX86State *env, DisasContext *s,
         tcg_gen_trunc_tl_i32(cpu_tmp2_i32, cpu_T[0]);
         tcg_gen_trunc_tl_i32(cpu_tmp3_i32, cpu_T[1]);
         gen_helper_out_func(ot, cpu_tmp2_i32, cpu_tmp3_i32);
+        gen_bpt_io(s, cpu_tmp2_i32, ot);
         if (s->tb->cflags & CF_USE_ICOUNT) {
             gen_io_end();
             gen_jmp(s, s->pc - s->cs_base);
@@ -7609,18 +7627,20 @@ static target_ulong disas_insn(CPUX86State *env, DisasContext *s,
                 ot = MO_64;
             else
                 ot = MO_32;
-            /* XXX: do it dynamically with CR4.DE bit */
-            if (reg == 4 || reg == 5 || reg >= 8)
+            if (reg >= 8) {
                 goto illegal_op;
+            }
             if (b & 2) {
                 gen_svm_check_intercept(s, pc_start, SVM_EXIT_WRITE_DR0 + reg);
                 gen_op_mov_v_reg(ot, cpu_T[0], rm);
-                gen_helper_movl_drN_T0(cpu_env, tcg_const_i32(reg), cpu_T[0]);
+                tcg_gen_movi_i32(cpu_tmp2_i32, reg);
+                gen_helper_set_dr(cpu_env, cpu_tmp2_i32, cpu_T[0]);
                 gen_jmp_im(s->pc - s->cs_base);
                 gen_eob(s);
             } else {
                 gen_svm_check_intercept(s, pc_start, SVM_EXIT_READ_DR0 + reg);
-                tcg_gen_ld_tl(cpu_T[0], cpu_env, offsetof(CPUX86State,dr[reg]));
+                tcg_gen_movi_i32(cpu_tmp2_i32, reg);
+                gen_helper_get_dr(cpu_T[0], cpu_env, cpu_tmp2_i32);
                 gen_op_mov_reg_v(ot, rm, cpu_T[0]);
             }
         }
@@ -7696,20 +7716,43 @@ static target_ulong disas_insn(CPUX86State *env, DisasContext *s,
             }
             break;
         case 5: /* lfence */
-        case 6: /* mfence */
             if ((modrm & 0xc7) != 0xc0 || !(s->cpuid_features & CPUID_SSE2))
                 goto illegal_op;
             break;
-        case 7: /* sfence / clflush */
-            if ((modrm & 0xc7) == 0xc0) {
-                /* sfence */
-                /* XXX: also check for cpuid_ext2_features & CPUID_EXT2_EMMX */
-                if (!(s->cpuid_features & CPUID_SSE))
+        case 6: /* mfence/clwb */
+            if (s->prefix & PREFIX_DATA) {
+                /* clwb */
+                if (!(s->cpuid_7_0_ebx_features & CPUID_7_0_EBX_CLWB))
                     goto illegal_op;
+                gen_nop_modrm(env, s, modrm);
             } else {
-                /* clflush */
-                if (!(s->cpuid_features & CPUID_CLFLUSH))
+                /* mfence */
+                if ((modrm & 0xc7) != 0xc0 || !(s->cpuid_features & CPUID_SSE2))
                     goto illegal_op;
+            }
+            break;
+        case 7: /* sfence / clflush / clflushopt / pcommit */
+            if ((modrm & 0xc7) == 0xc0) {
+                if (s->prefix & PREFIX_DATA) {
+                    /* pcommit */
+                    if (!(s->cpuid_7_0_ebx_features & CPUID_7_0_EBX_PCOMMIT))
+                        goto illegal_op;
+                } else {
+                    /* sfence */
+                    /* XXX: also check for cpuid_ext2_features & CPUID_EXT2_EMMX */
+                    if (!(s->cpuid_features & CPUID_SSE))
+                        goto illegal_op;
+                }
+            } else {
+                if (s->prefix & PREFIX_DATA) {
+                    /* clflushopt */
+                    if (!(s->cpuid_7_0_ebx_features & CPUID_7_0_EBX_CLFLUSHOPT))
+                        goto illegal_op;
+                } else {
+                    /* clflush */
+                    if (!(s->cpuid_features & CPUID_CLFLUSH))
+                        goto illegal_op;
+                }
                 gen_lea_modrm(env, s, modrm);
             }
             break;
@@ -7951,6 +7994,11 @@ void gen_intermediate_code(CPUX86State *env, TranslationBlock *tb)
                                          tb->flags & HF_RF_MASK
                                          ? BP_GDB : BP_ANY))) {
             gen_debug(dc, pc_ptr - dc->cs_base);
+            /* The address covered by the breakpoint must be included in
+               [tb->pc, tb->pc + tb->size) in order to for it to be
+               properly cleared -- thus we increment the PC here so that
+               the logic setting tb->size below does the right thing.  */
+            pc_ptr += 1;
             goto done_generating;
         }
         if (num_insns == max_insns && (tb->cflags & CF_LAST_IO)) {

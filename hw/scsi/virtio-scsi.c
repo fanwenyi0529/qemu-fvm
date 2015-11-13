@@ -47,7 +47,7 @@ VirtIOSCSIReq *virtio_scsi_init_req(VirtIOSCSI *s, VirtQueue *vq)
     const size_t zero_skip = offsetof(VirtIOSCSIReq, elem)
                              + sizeof(VirtQueueElement);
 
-    req = g_slice_alloc(sizeof(*req) + vs->cdb_size);
+    req = g_malloc(sizeof(*req) + vs->cdb_size);
     req->vq = vq;
     req->dev = s;
     qemu_sglist_init(&req->qsgl, DEVICE(s), 8, &address_space_memory);
@@ -58,11 +58,9 @@ VirtIOSCSIReq *virtio_scsi_init_req(VirtIOSCSI *s, VirtQueue *vq)
 
 void virtio_scsi_free_req(VirtIOSCSIReq *req)
 {
-    VirtIOSCSICommon *vs = (VirtIOSCSICommon *)req->dev;
-
     qemu_iovec_destroy(&req->resp_iov);
     qemu_sglist_destroy(&req->qsgl);
-    g_slice_free1(sizeof(*req) + vs->cdb_size, req);
+    g_free(req);
 }
 
 static void virtio_scsi_complete_req(VirtIOSCSIReq *req)
@@ -207,20 +205,8 @@ static void *virtio_scsi_load_request(QEMUFile *f, SCSIRequest *sreq)
     assert(n < vs->conf.num_queues);
     req = virtio_scsi_init_req(s, vs->cmd_vqs[n]);
     qemu_get_buffer(f, (unsigned char *)&req->elem, sizeof(req->elem));
-    /* TODO: add a way for SCSIBusInfo's load_request to fail,
-     * and fail migration instead of asserting here.
-     * When we do, we might be able to re-enable NDEBUG below.
-     */
-#ifdef NDEBUG
-#error building with NDEBUG is not supported
-#endif
-    assert(req->elem.in_num <= ARRAY_SIZE(req->elem.in_sg));
-    assert(req->elem.out_num <= ARRAY_SIZE(req->elem.out_sg));
 
-    virtqueue_map_sg(req->elem.in_sg, req->elem.in_addr,
-                     req->elem.in_num, 1);
-    virtqueue_map_sg(req->elem.out_sg, req->elem.out_addr,
-                     req->elem.out_num, 0);
+    virtqueue_map(&req->elem);
 
     if (virtio_scsi_parse_req(req, sizeof(VirtIOSCSICmdReq) + vs->cdb_size,
                               sizeof(VirtIOSCSICmdResp) + vs->sense_size) < 0) {
@@ -250,7 +236,7 @@ static void virtio_scsi_cancel_notify(Notifier *notifier, void *data)
     if (--n->tmf_req->remaining == 0) {
         virtio_scsi_complete_req(n->tmf_req);
     }
-    g_slice_free(VirtIOSCSICancelNotifier, n);
+    g_free(n);
 }
 
 /* Return 0 if the request is ready to be completed and return to guest;
@@ -301,7 +287,7 @@ static int virtio_scsi_do_tmf(VirtIOSCSI *s, VirtIOSCSIReq *req)
                 VirtIOSCSICancelNotifier *notifier;
 
                 req->remaining = 1;
-                notifier = g_slice_new(VirtIOSCSICancelNotifier);
+                notifier = g_new(VirtIOSCSICancelNotifier, 1);
                 notifier->tmf_req = req;
                 notifier->notifier.notify = virtio_scsi_cancel_notify;
                 scsi_req_cancel_async(r, &notifier->notifier);
@@ -350,7 +336,7 @@ static int virtio_scsi_do_tmf(VirtIOSCSI *s, VirtIOSCSIReq *req)
                     VirtIOSCSICancelNotifier *notifier;
 
                     req->remaining++;
-                    notifier = g_slice_new(VirtIOSCSICancelNotifier);
+                    notifier = g_new(VirtIOSCSICancelNotifier, 1);
                     notifier->notifier.notify = virtio_scsi_cancel_notify;
                     notifier->tmf_req = req;
                     scsi_req_cancel_async(r, &notifier->notifier);
@@ -667,6 +653,11 @@ static void virtio_scsi_reset(VirtIODevice *vdev)
 static void virtio_scsi_save(QEMUFile *f, void *opaque)
 {
     VirtIODevice *vdev = VIRTIO_DEVICE(opaque);
+    VirtIOSCSI *s = VIRTIO_SCSI(vdev);
+
+    if (s->dataplane_started) {
+        virtio_scsi_dataplane_stop(s);
+    }
     virtio_save(vdev, f);
 }
 

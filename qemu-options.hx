@@ -2012,6 +2012,7 @@ qemu -m 512 -object memory-backend-file,id=mem,size=512M,mem-path=/hugetlbfs,sha
 Dump network traffic on VLAN @var{n} to file @var{file} (@file{qemu-vlan0.pcap} by default).
 At most @var{len} bytes (64k by default) per packet are stored. The file format is
 libpcap, so it can be analyzed with tools such as tcpdump or Wireshark.
+Note: For devices created with '-netdev', use '-object filter-dump,...' instead.
 
 @item -net none
 Indicate that no network devices should be configured. It is used to
@@ -2724,13 +2725,18 @@ ETEXI
 
 DEF("fw_cfg", HAS_ARG, QEMU_OPTION_fwcfg,
     "-fw_cfg [name=]<name>,file=<file>\n"
-    "                add named fw_cfg entry from file\n",
+    "                add named fw_cfg entry from file\n"
+    "-fw_cfg [name=]<name>,string=<str>\n"
+    "                add named fw_cfg entry from string\n",
     QEMU_ARCH_ALL)
 STEXI
 @item -fw_cfg [name=]@var{name},file=@var{file}
 @findex -fw_cfg
 Add named fw_cfg entry from file. @var{name} determines the name of
 the entry in the fw_cfg file directory exposed to the guest.
+
+@item -fw_cfg [name=]@var{name},string=@var{str}
+Add named fw_cfg entry from string.
 ETEXI
 
 DEF("serial", HAS_ARG, QEMU_OPTION_serial, \
@@ -3151,12 +3157,12 @@ re-inject them.
 ETEXI
 
 DEF("icount", HAS_ARG, QEMU_OPTION_icount, \
-    "-icount [shift=N|auto][,align=on|off][,sleep=no]\n" \
+    "-icount [shift=N|auto][,align=on|off][,sleep=no,rr=record|replay,rrfile=<filename>]\n" \
     "                enable virtual instruction counter with 2^N clock ticks per\n" \
     "                instruction, enable aligning the host and virtual clocks\n" \
     "                or disable real time cpu sleeping\n", QEMU_ARCH_ALL)
 STEXI
-@item -icount [shift=@var{N}|auto]
+@item -icount [shift=@var{N}|auto][,rr=record|replay,rrfile=@var{filename}]
 @findex -icount
 Enable virtual instruction counter.  The virtual cpu will execute one
 instruction every 2^@var{N} ns of virtual time.  If @code{auto} is specified
@@ -3185,6 +3191,10 @@ Currently this option does not work when @option{shift} is @code{auto}.
 Note: The sync algorithm will work for those shift values for which
 the guest clock runs ahead of the host clock. Typically this happens
 when the shift value is high (how high depends on the host machine).
+
+When @option{rr} option is specified deterministic record/replay is enabled.
+Replay log is written into @var{filename} file in record mode and
+read from this file in replay mode.
 ETEXI
 
 DEF("watchdog", HAS_ARG, QEMU_OPTION_watchdog, \
@@ -3654,6 +3664,30 @@ providing the x509 certificates. The certificates must be stored
 in PEM format, in filenames @var{ca-cert.pem}, @var{ca-crl.pem} (optional),
 @var{server-cert.pem} (only servers), @var{server-key.pem} (only servers),
 @var{client-cert.pem} (only clients), and @var{client-key.pem} (only clients).
+
+@item -object filter-buffer,id=@var{id},netdev=@var{netdevid},interval=@var{t}[,queue=@var{all|rx|tx}]
+
+Interval @var{t} can't be 0, this filter batches the packet delivery: all
+packets arriving in a given interval on netdev @var{netdevid} are delayed
+until the end of the interval. Interval is in microseconds.
+
+queue @var{all|rx|tx} is an option that can be applied to any netfilter.
+
+@option{all}: the filter is attached both to the receive and the transmit
+              queue of the netdev (default).
+
+@option{rx}: the filter is attached to the receive queue of the netdev,
+             where it will receive packets sent to the netdev.
+
+@option{tx}: the filter is attached to the transmit queue of the netdev,
+             where it will receive packets sent by the netdev.
+
+@item -object filter-dump,id=@var{id},netdev=@var{dev},file=@var{filename}][,maxlen=@var{len}]
+
+Dump the network traffic on netdev @var{dev} to the file specified by
+@var{filename}. At most @var{len} bytes (64k by default) per packet are stored.
+The file format is libpcap, so it can be analyzed with tools such as tcpdump
+or Wireshark.
 
 @end table
 

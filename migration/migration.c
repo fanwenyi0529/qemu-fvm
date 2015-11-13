@@ -294,16 +294,21 @@ static void process_incoming_migration_co(void *opaque)
         migrate_decompress_threads_join();
         exit(EXIT_FAILURE);
     }
-    migrate_generate_event(MIGRATION_STATUS_COMPLETED);
-    qemu_announce_self();
 
     /* Make sure all file formats flush their mutable metadata */
     bdrv_invalidate_cache_all(&local_err);
     if (local_err) {
+        migrate_generate_event(MIGRATION_STATUS_FAILED);
         error_report_err(local_err);
         migrate_decompress_threads_join();
         exit(EXIT_FAILURE);
     }
+
+    /*
+     * This must happen after all error conditions are dealt with and
+     * we're sure the VM is going to be running on this host.
+     */
+    qemu_announce_self();
 
     /* If global state section was not received or we are in running
        state, we need to obey autostart. Any other state is set with
@@ -320,6 +325,12 @@ static void process_incoming_migration_co(void *opaque)
         runstate_set(global_state_get_runstate());
     }
     migrate_decompress_threads_join();
+    /*
+     * This must happen after any state changes since as soon as an external
+     * observer sees this event they might start to prod at the VM assuming
+     * it's ready to use.
+     */
+    migrate_generate_event(MIGRATION_STATUS_COMPLETED);
 }
 
 void process_incoming_migration(QEMUFile *f)
@@ -602,12 +613,9 @@ static void migrate_fd_cleanup(void *opaque)
 
     assert(s->state != MIGRATION_STATUS_ACTIVE);
 
-    if (s->state != MIGRATION_STATUS_COMPLETED) {
-        qemu_savevm_state_cancel();
-        if (s->state == MIGRATION_STATUS_CANCELLING) {
-            migrate_set_state(s, MIGRATION_STATUS_CANCELLING,
-                              MIGRATION_STATUS_CANCELLED);
-        }
+    if (s->state == MIGRATION_STATUS_CANCELLING) {
+        migrate_set_state(s, MIGRATION_STATUS_CANCELLING,
+                          MIGRATION_STATUS_CANCELLED);
     }
 
     notifier_list_notify(&migration_state_notifiers, s);
@@ -1017,6 +1025,7 @@ static void *migration_thread(void *opaque)
     int64_t initial_bytes = 0;
     int64_t max_size = 0;
     int64_t start_time = initial_time;
+    int64_t end_time;
     bool old_vm_running = false;
 
     rcu_register_thread();
@@ -1078,10 +1087,11 @@ static void *migration_thread(void *opaque)
 
     /* If we enabled cpu throttling for auto-converge, turn it off. */
     cpu_throttle_stop();
+    end_time = qemu_clock_get_ms(QEMU_CLOCK_REALTIME);
 
     qemu_mutex_lock_iothread();
+    qemu_savevm_state_cleanup();
     if (s->state == MIGRATION_STATUS_COMPLETED) {
-        int64_t end_time = qemu_clock_get_ms(QEMU_CLOCK_REALTIME);
         uint64_t transferred_bytes = qemu_ftell(s->file);
         s->total_time = end_time - s->total_time;
         s->downtime = end_time - start_time;

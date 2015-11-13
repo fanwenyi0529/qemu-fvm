@@ -50,11 +50,15 @@
 #include "qemu/rcu_queue.h"
 #include "qemu/main-loop.h"
 #include "translate-all.h"
+#include "sysemu/replay.h"
 
 #include "exec/memory-internal.h"
 #include "exec/ram_addr.h"
 
 #include "qemu/range.h"
+#ifndef _WIN32
+#include "qemu/mmap-alloc.h"
+#endif
 
 //#define DEBUG_SUBPAGE
 
@@ -84,9 +88,9 @@ static MemoryRegion io_mem_unassigned;
  */
 #define RAM_RESIZEABLE (1 << 2)
 
-/* An extra page is mapped on top of this RAM.
+/* RAM is backed by an mmapped file.
  */
-#define RAM_EXTRA (1 << 3)
+#define RAM_FILE (1 << 3)
 #endif
 
 struct CPUTailQ cpus = QTAILQ_HEAD_INITIALIZER(cpus);
@@ -161,6 +165,21 @@ static void memory_map_init(void);
 static void tcg_commit(MemoryListener *listener);
 
 static MemoryRegion io_mem_watch;
+
+/**
+ * CPUAddressSpace: all the information a CPU needs about an AddressSpace
+ * @cpu: the CPU whose AddressSpace this is
+ * @as: the AddressSpace itself
+ * @memory_dispatch: its dispatch pointer (cached, RCU protected)
+ * @tcg_as_listener: listener for tracking changes to the AddressSpace
+ */
+struct CPUAddressSpace {
+    CPUState *cpu;
+    AddressSpace *as;
+    struct AddressSpaceDispatch *memory_dispatch;
+    MemoryListener tcg_as_listener;
+};
+
 #endif
 
 #if !defined(CONFIG_USER_ONLY)
@@ -431,7 +450,7 @@ address_space_translate_for_iotlb(CPUState *cpu, hwaddr addr,
                                   hwaddr *xlat, hwaddr *plen)
 {
     MemoryRegionSection *section;
-    section = address_space_translate_internal(cpu->memory_dispatch,
+    section = address_space_translate_internal(cpu->cpu_ases[0].memory_dispatch,
                                                addr, xlat, plen, false);
 
     assert(!section->mr->iommu_ops);
@@ -537,13 +556,16 @@ void tcg_cpu_address_space_init(CPUState *cpu, AddressSpace *as)
     /* We only support one address space per cpu at the moment.  */
     assert(cpu->as == as);
 
-    if (cpu->tcg_as_listener) {
-        memory_listener_unregister(cpu->tcg_as_listener);
-    } else {
-        cpu->tcg_as_listener = g_new0(MemoryListener, 1);
+    if (cpu->cpu_ases) {
+        /* We've already registered the listener for our only AS */
+        return;
     }
-    cpu->tcg_as_listener->commit = tcg_commit;
-    memory_listener_register(cpu->tcg_as_listener, as);
+
+    cpu->cpu_ases = g_new0(CPUAddressSpace, 1);
+    cpu->cpu_ases[0].cpu = cpu;
+    cpu->cpu_ases[0].as = as;
+    cpu->cpu_ases[0].tcg_as_listener.commit = tcg_commit;
+    memory_listener_register(&cpu->cpu_ases[0].tcg_as_listener, as);
 }
 #endif
 
@@ -607,7 +629,6 @@ void cpu_exec_init(CPUState *cpu, Error **errp)
 #ifndef CONFIG_USER_ONLY
     cpu->as = &address_space_memory;
     cpu->thread_id = qemu_get_thread_id();
-    cpu_reload_memory_map(cpu);
 #endif
 
 #if defined(CONFIG_USER_ONLY)
@@ -868,6 +889,7 @@ void QEMU_NORETURN cpu_abort(CPUState *cpu, const char *fmt, ...)
     }
     va_end(ap2);
     va_end(ap);
+    replay_finish();
 #if defined(CONFIG_USER_ONLY)
     {
         struct sigaction act;
@@ -887,7 +909,7 @@ static RAMBlock *qemu_get_ram_block(ram_addr_t addr)
 
     block = atomic_rcu_read(&ram_list.mru_block);
     if (block && addr - block->offset < block->max_length) {
-        goto found;
+        return block;
     }
     QLIST_FOREACH_RCU(block, &ram_list.blocks, next) {
         if (addr - block->offset < block->max_length) {
@@ -1191,16 +1213,14 @@ static void *file_ram_alloc(RAMBlock *block,
                             const char *path,
                             Error **errp)
 {
+    struct stat st;
     char *filename;
     char *sanitized_name;
     char *c;
-    void *ptr;
     void * volatile area = NULL;
     int fd;
     uint64_t hpagesize;
-    uint64_t total;
     Error *local_err = NULL;
-    size_t offset;
 
     hpagesize = gethugepagesize(path, &local_err);
     if (local_err) {
@@ -1222,29 +1242,35 @@ static void *file_ram_alloc(RAMBlock *block,
         goto error;
     }
 
-    /* Make name safe to use with mkstemp by replacing '/' with '_'. */
-    sanitized_name = g_strdup(memory_region_name(block->mr));
-    for (c = sanitized_name; *c != '\0'; c++) {
-        if (*c == '/')
-            *c = '_';
+    if (!stat(path, &st) && S_ISDIR(st.st_mode)) {
+        /* Make name safe to use with mkstemp by replacing '/' with '_'. */
+        sanitized_name = g_strdup(memory_region_name(block->mr));
+        for (c = sanitized_name; *c != '\0'; c++) {
+            if (*c == '/') {
+                *c = '_';
+            }
+        }
+
+        filename = g_strdup_printf("%s/qemu_back_mem.%s.XXXXXX", path,
+                                   sanitized_name);
+        g_free(sanitized_name);
+
+        fd = mkstemp(filename);
+        if (fd >= 0) {
+            unlink(filename);
+        }
+        g_free(filename);
+    } else {
+        fd = open(path, O_RDWR | O_CREAT, 0644);
     }
 
-    filename = g_strdup_printf("%s/qemu_back_mem.%s.XXXXXX", path,
-                               sanitized_name);
-    g_free(sanitized_name);
-
-    fd = mkstemp(filename);
     if (fd < 0) {
         error_setg_errno(errp, errno,
                          "unable to create backing store for hugepages");
-        g_free(filename);
         goto error;
     }
-    unlink(filename);
-    g_free(filename);
 
     memory = ROUND_UP(memory, hpagesize);
-    total = memory + hpagesize;
 
     /*
      * ftruncate is not supported by hugetlbfs in older
@@ -1256,38 +1282,12 @@ static void *file_ram_alloc(RAMBlock *block,
         perror("ftruncate");
     }
 
-    ptr = mmap(0, total, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS,
-                -1, 0);
-    if (ptr == MAP_FAILED) {
-        error_setg_errno(errp, errno,
-                         "unable to allocate memory range for hugepages");
-        close(fd);
-        goto error;
-    }
-
-    offset = QEMU_ALIGN_UP((uintptr_t)ptr, hpagesize) - (uintptr_t)ptr;
-
-    area = mmap(ptr + offset, memory, PROT_READ | PROT_WRITE,
-                (block->flags & RAM_SHARED ? MAP_SHARED : MAP_PRIVATE) |
-                MAP_FIXED,
-                fd, 0);
+    area = qemu_ram_mmap(fd, memory, hpagesize, block->flags & RAM_SHARED);
     if (area == MAP_FAILED) {
         error_setg_errno(errp, errno,
                          "unable to map backing store for hugepages");
-        munmap(ptr, total);
         close(fd);
         goto error;
-    }
-
-    if (offset > 0) {
-        munmap(ptr, offset);
-    }
-    ptr += offset;
-    total -= offset;
-
-    if (total > memory + getpagesize()) {
-        munmap(ptr + memory + getpagesize(),
-               total - memory - getpagesize());
     }
 
     if (mem_prealloc) {
@@ -1298,10 +1298,6 @@ static void *file_ram_alloc(RAMBlock *block,
     return area;
 
 error:
-    if (mem_prealloc) {
-        error_report("%s", error_get_pretty(*errp));
-        exit(1);
-    }
     return NULL;
 }
 #endif
@@ -1613,7 +1609,7 @@ ram_addr_t qemu_ram_alloc_from_file(ram_addr_t size, MemoryRegion *mr,
     new_block->used_length = size;
     new_block->max_length = size;
     new_block->flags = share ? RAM_SHARED : 0;
-    new_block->flags |= RAM_EXTRA;
+    new_block->flags |= RAM_FILE;
     new_block->host = file_ram_alloc(new_block, size,
                                      mem_path, errp);
     if (!new_block->host) {
@@ -1715,8 +1711,8 @@ static void reclaim_ramblock(RAMBlock *block)
         xen_invalidate_map_cache_entry(block->host);
 #ifndef _WIN32
     } else if (block->fd >= 0) {
-        if (block->flags & RAM_EXTRA) {
-            munmap(block->host, block->max_length + getpagesize());
+        if (block->flags & RAM_FILE) {
+            qemu_ram_munmap(block->host, block->max_length);
         } else {
             munmap(block->host, block->max_length);
         }
@@ -2240,7 +2236,8 @@ static uint16_t dummy_section(PhysPageMap *map, AddressSpace *as,
 
 MemoryRegion *iotlb_to_region(CPUState *cpu, hwaddr index)
 {
-    AddressSpaceDispatch *d = atomic_rcu_read(&cpu->memory_dispatch);
+    CPUAddressSpace *cpuas = &cpu->cpu_ases[0];
+    AddressSpaceDispatch *d = atomic_rcu_read(&cpuas->memory_dispatch);
     MemoryRegionSection *sections = d->map.sections;
 
     return sections[index & ~TARGET_PAGE_MASK].mr;
@@ -2299,19 +2296,20 @@ static void mem_commit(MemoryListener *listener)
 
 static void tcg_commit(MemoryListener *listener)
 {
-    CPUState *cpu;
+    CPUAddressSpace *cpuas;
+    AddressSpaceDispatch *d;
 
     /* since each CPU stores ram addresses in its TLB cache, we must
        reset the modified entries */
-    /* XXX: slow ! */
-    CPU_FOREACH(cpu) {
-        /* FIXME: Disentangle the cpu.h circular files deps so we can
-           directly get the right CPU from listener.  */
-        if (cpu->tcg_as_listener != listener) {
-            continue;
-        }
-        cpu_reload_memory_map(cpu);
-    }
+    cpuas = container_of(listener, CPUAddressSpace, tcg_as_listener);
+    cpu_reloading_memory_map();
+    /* The CPU and TLB are protected by the iothread lock.
+     * We reload the dispatch pointer now because cpu_reloading_memory_map()
+     * may have split the RCU critical section.
+     */
+    d = atomic_rcu_read(&cpuas->as->dispatch);
+    cpuas->memory_dispatch = d;
+    tlb_flush(cpuas->cpu, 1);
 }
 
 void address_space_init_dispatch(AddressSpace *as)
@@ -2727,8 +2725,8 @@ void cpu_register_map_client(QEMUBH *bh)
 void cpu_exec_init_all(void)
 {
     qemu_mutex_init(&ram_list.mutex);
-    memory_map_init();
     io_mem_init();
+    memory_map_init();
     qemu_mutex_init(&map_client_list_lock);
 }
 

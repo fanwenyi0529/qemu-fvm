@@ -24,6 +24,7 @@
 #include "sysemu/arch_init.h"
 #include "hw/qdev.h"
 #include "sysemu/blockdev.h"
+#include "sysemu/block-backend.h"
 #include "qom/qom-qobject.h"
 #include "qapi/qmp/qerror.h"
 #include "qapi/qmp/qobject.h"
@@ -170,6 +171,7 @@ SpiceInfo *qmp_query_spice(Error **errp)
 void qmp_cont(Error **errp)
 {
     Error *local_err = NULL;
+    BlockBackend *blk;
     BlockDriverState *bs;
 
     if (runstate_needs_reset()) {
@@ -179,8 +181,8 @@ void qmp_cont(Error **errp)
         return;
     }
 
-    for (bs = bdrv_next(NULL); bs; bs = bdrv_next(bs)) {
-        bdrv_iostatus_reset(bs);
+    for (blk = blk_next(NULL); blk; blk = blk_next(blk)) {
+        blk_iostatus_reset(blk);
     }
     for (bs = bdrv_next(NULL); bs; bs = bdrv_next(bs)) {
         bdrv_add_key(bs, NULL, &local_err);
@@ -512,6 +514,17 @@ DevicePropertyInfoList *qmp_device_list_properties(const char *typename,
     klass = object_class_dynamic_cast(klass, TYPE_DEVICE);
     if (klass == NULL) {
         error_setg(errp, QERR_INVALID_PARAMETER_VALUE, "name", TYPE_DEVICE);
+        return NULL;
+    }
+
+    if (object_class_is_abstract(klass)) {
+        error_setg(errp, QERR_INVALID_PARAMETER_VALUE, "name",
+                   "non-abstract device type");
+        return NULL;
+    }
+
+    if (DEVICE_CLASS(klass)->cannot_destroy_with_object_finalize_yet) {
+        error_setg(errp, "Can't list properties of device '%s'", typename);
         return NULL;
     }
 

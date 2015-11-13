@@ -468,6 +468,8 @@ static inline PageDesc *page_find(tb_page_addr_t index)
 # define MAX_CODE_GEN_BUFFER_SIZE  (2ul * 1024 * 1024 * 1024)
 #elif defined(__sparc__)
 # define MAX_CODE_GEN_BUFFER_SIZE  (2ul * 1024 * 1024 * 1024)
+#elif defined(__powerpc64__)
+# define MAX_CODE_GEN_BUFFER_SIZE  (2ul * 1024 * 1024 * 1024)
 #elif defined(__aarch64__)
 # define MAX_CODE_GEN_BUFFER_SIZE  (128ul * 1024 * 1024)
 #elif defined(__arm__)
@@ -1067,7 +1069,7 @@ TranslationBlock *tb_gen_code(CPUState *cpu,
 #endif
 
     phys_pc = get_page_addr_code(env, pc);
-    if (use_icount) {
+    if (use_icount && !(cflags & CF_IGNORE_ICOUNT)) {
         cflags |= CF_USE_ICOUNT;
     }
 

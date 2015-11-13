@@ -713,7 +713,7 @@ static void cuda_initfn(Object *obj)
     CUDAState *s = CUDA(obj);
     int i;
 
-    memory_region_init_io(&s->mem, NULL, &cuda_ops, s, "cuda", 0x2000);
+    memory_region_init_io(&s->mem, obj, &cuda_ops, s, "cuda", 0x2000);
     sysbus_init_mmio(d, &s->mem);
     sysbus_init_irq(d, &s->irq);
 
@@ -738,6 +738,7 @@ static void cuda_class_init(ObjectClass *oc, void *data)
     dc->reset = cuda_reset;
     dc->vmsd = &vmstate_cuda;
     dc->props = cuda_properties;
+    set_bit(DEVICE_CATEGORY_BRIDGE, dc->categories);
 }
 
 static const TypeInfo cuda_type_info = {

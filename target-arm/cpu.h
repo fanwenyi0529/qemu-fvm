@@ -279,6 +279,7 @@ typedef struct CPUARMState {
             };
             uint64_t far_el[4];
         };
+        uint64_t hpfar_el2;
         union { /* Translation result. */
             struct {
                 uint64_t _unused_par_0;
@@ -379,6 +380,8 @@ typedef struct CPUARMState {
         uint64_t dbgwvr[16]; /* watchpoint value registers */
         uint64_t dbgwcr[16]; /* watchpoint control registers */
         uint64_t mdscr_el1;
+        uint64_t oslsr_el1; /* OS Lock Status */
+        uint64_t mdcr_el2;
         /* If the counter is enabled, this stores the last time the counter
          * was reset. Otherwise it stores the counter value
          */
@@ -1022,11 +1025,11 @@ static inline bool access_secure_reg(CPUARMState *env)
  */
 #define A32_BANKED_CURRENT_REG_GET(_env, _regname)        \
     A32_BANKED_REG_GET((_env), _regname,                \
-                       ((!arm_el_is_aa64((_env), 3) && arm_is_secure(_env))))
+                       (arm_is_secure(_env) && !arm_el_is_aa64((_env), 3)))
 
 #define A32_BANKED_CURRENT_REG_SET(_env, _regname, _val)                       \
     A32_BANKED_REG_SET((_env), _regname,                                    \
-                       ((!arm_el_is_aa64((_env), 3) && arm_is_secure(_env))),  \
+                       (arm_is_secure(_env) && !arm_el_is_aa64((_env), 3)), \
                        (_val))
 
 void arm_cpu_list(FILE *f, fprintf_function cpu_fprintf);
@@ -1529,8 +1532,6 @@ static inline bool arm_excp_unmasked(CPUState *cs, unsigned int excp_idx,
     CPUARMState *env = cs->env_ptr;
     unsigned int cur_el = arm_current_el(env);
     bool secure = arm_is_secure(env);
-    bool scr;
-    bool hcr;
     bool pstate_unmasked;
     int8_t unmasked = 0;
 
@@ -1544,31 +1545,10 @@ static inline bool arm_excp_unmasked(CPUState *cs, unsigned int excp_idx,
 
     switch (excp_idx) {
     case EXCP_FIQ:
-        /* If FIQs are routed to EL3 or EL2 then there are cases where we
-         * override the CPSR.F in determining if the exception is masked or
-         * not.  If neither of these are set then we fall back to the CPSR.F
-         * setting otherwise we further assess the state below.
-         */
-        hcr = (env->cp15.hcr_el2 & HCR_FMO);
-        scr = (env->cp15.scr_el3 & SCR_FIQ);
-
-        /* When EL3 is 32-bit, the SCR.FW bit controls whether the CPSR.F bit
-         * masks FIQ interrupts when taken in non-secure state.  If SCR.FW is
-         * set then FIQs can be masked by CPSR.F when non-secure but only
-         * when FIQs are only routed to EL3.
-         */
-        scr = scr && !((env->cp15.scr_el3 & SCR_FW) && !hcr);
         pstate_unmasked = !(env->daif & PSTATE_F);
         break;
 
     case EXCP_IRQ:
-        /* When EL3 execution state is 32-bit, if HCR.IMO is set then we may
-         * override the CPSR.I masking when in non-secure state.  The SCR.IRQ
-         * setting has already been taken into consideration when setting the
-         * target EL, so it does not have a further affect here.
-         */
-        hcr = (env->cp15.hcr_el2 & HCR_IMO);
-        scr = false;
         pstate_unmasked = !(env->daif & PSTATE_I);
         break;
 
@@ -1593,8 +1573,58 @@ static inline bool arm_excp_unmasked(CPUState *cs, unsigned int excp_idx,
      * interrupt.
      */
     if ((target_el > cur_el) && (target_el != 1)) {
-        if (arm_el_is_aa64(env, 3) || ((scr || hcr) && (!secure))) {
-            unmasked = 1;
+        /* Exceptions targeting a higher EL may not be maskable */
+        if (arm_feature(env, ARM_FEATURE_AARCH64)) {
+            /* 64-bit masking rules are simple: exceptions to EL3
+             * can't be masked, and exceptions to EL2 can only be
+             * masked from Secure state. The HCR and SCR settings
+             * don't affect the masking logic, only the interrupt routing.
+             */
+            if (target_el == 3 || !secure) {
+                unmasked = 1;
+            }
+        } else {
+            /* The old 32-bit-only environment has a more complicated
+             * masking setup. HCR and SCR bits not only affect interrupt
+             * routing but also change the behaviour of masking.
+             */
+            bool hcr, scr;
+
+            switch (excp_idx) {
+            case EXCP_FIQ:
+                /* If FIQs are routed to EL3 or EL2 then there are cases where
+                 * we override the CPSR.F in determining if the exception is
+                 * masked or not. If neither of these are set then we fall back
+                 * to the CPSR.F setting otherwise we further assess the state
+                 * below.
+                 */
+                hcr = (env->cp15.hcr_el2 & HCR_FMO);
+                scr = (env->cp15.scr_el3 & SCR_FIQ);
+
+                /* When EL3 is 32-bit, the SCR.FW bit controls whether the
+                 * CPSR.F bit masks FIQ interrupts when taken in non-secure
+                 * state. If SCR.FW is set then FIQs can be masked by CPSR.F
+                 * when non-secure but only when FIQs are only routed to EL3.
+                 */
+                scr = scr && !((env->cp15.scr_el3 & SCR_FW) && !hcr);
+                break;
+            case EXCP_IRQ:
+                /* When EL3 execution state is 32-bit, if HCR.IMO is set then
+                 * we may override the CPSR.I masking when in non-secure state.
+                 * The SCR.IRQ setting has already been taken into consideration
+                 * when setting the target EL, so it does not have a further
+                 * affect here.
+                 */
+                hcr = (env->cp15.hcr_el2 & HCR_IMO);
+                scr = false;
+                break;
+            default:
+                g_assert_not_reached();
+            }
+
+            if ((scr || hcr) && !secure) {
+                unmasked = 1;
+            }
         }
     }
 
@@ -1701,7 +1731,22 @@ static inline int cpu_mmu_index(CPUARMState *env, bool ifetch)
  */
 static inline int arm_debug_target_el(CPUARMState *env)
 {
-    return 1;
+    bool secure = arm_is_secure(env);
+    bool route_to_el2 = false;
+
+    if (arm_feature(env, ARM_FEATURE_EL2) && !secure) {
+        route_to_el2 = env->cp15.hcr_el2 & HCR_TGE ||
+                       env->cp15.mdcr_el2 & (1 << 8);
+    }
+
+    if (route_to_el2) {
+        return 2;
+    } else if (arm_feature(env, ARM_FEATURE_EL3) &&
+               !arm_el_is_aa64(env, 3) && secure) {
+        return 3;
+    } else {
+        return 1;
+    }
 }
 
 static inline bool aa64_generate_debug_exceptions(CPUARMState *env)

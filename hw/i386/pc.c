@@ -752,14 +752,15 @@ static void pc_build_smbios(FWCfgState *fw_cfg)
     }
 }
 
-static FWCfgState *bochs_bios_init(void)
+static FWCfgState *bochs_bios_init(AddressSpace *as)
 {
     FWCfgState *fw_cfg;
     uint64_t *numa_fw_cfg;
     int i, j;
     unsigned int apic_id_limit = pc_apic_id_limit(max_cpus);
 
-    fw_cfg = fw_cfg_init_io(BIOS_CFG_IOPORT);
+    fw_cfg = fw_cfg_init_io_dma(BIOS_CFG_IOPORT, BIOS_CFG_IOPORT + 4, as);
+
     /* FW_CFG_MAX_CPUS is a bit confusing/problematic on x86:
      *
      * SeaBIOS needs FW_CFG_MAX_CPUS for CPU hotplug, but the CPU hotplug
@@ -985,6 +986,10 @@ static void load_linux(PCMachineState *pcms,
         setup_size = 4;
     }
     setup_size = (setup_size+1)*512;
+    if (setup_size > kernel_size) {
+        fprintf(stderr, "qemu: invalid kernel header\n");
+        exit(1);
+    }
     kernel_size -= setup_size;
 
     setup  = g_malloc(setup_size);
@@ -1073,11 +1078,10 @@ out:
     return cpu;
 }
 
-static const char *current_cpu_model;
-
 void pc_hot_add_cpu(const int64_t id, Error **errp)
 {
     X86CPU *cpu;
+    MachineState *machine = MACHINE(qdev_get_machine());
     int64_t apic_id = x86_cpu_apic_id_from_index(id);
     Error *local_err = NULL;
 
@@ -1105,7 +1109,7 @@ void pc_hot_add_cpu(const int64_t id, Error **errp)
         return;
     }
 
-    cpu = pc_new_cpu(current_cpu_model, apic_id, &local_err);
+    cpu = pc_new_cpu(machine->cpu_model, apic_id, &local_err);
     if (local_err) {
         error_propagate(errp, local_err);
         return;
@@ -1113,22 +1117,22 @@ void pc_hot_add_cpu(const int64_t id, Error **errp)
     object_unref(OBJECT(cpu));
 }
 
-void pc_cpus_init(const char *cpu_model)
+void pc_cpus_init(PCMachineState *pcms)
 {
     int i;
     X86CPU *cpu = NULL;
+    MachineState *machine = MACHINE(pcms);
     Error *error = NULL;
     unsigned long apic_id_limit;
 
     /* init CPUs */
-    if (cpu_model == NULL) {
+    if (machine->cpu_model == NULL) {
 #ifdef TARGET_X86_64
-        cpu_model = "qemu64";
+        machine->cpu_model = "qemu64";
 #else
-        cpu_model = "qemu32";
+        machine->cpu_model = "qemu32";
 #endif
     }
-    current_cpu_model = cpu_model;
 
     apic_id_limit = pc_apic_id_limit(max_cpus);
     if (apic_id_limit > ACPI_CPU_HOTPLUG_ID_LIMIT) {
@@ -1138,7 +1142,7 @@ void pc_cpus_init(const char *cpu_model)
     }
 
     for (i = 0; i < smp_cpus; i++) {
-        cpu = pc_new_cpu(cpu_model, x86_cpu_apic_id_from_index(i),
+        cpu = pc_new_cpu(machine->cpu_model, x86_cpu_apic_id_from_index(i),
                          &error);
         if (error) {
             error_report_err(error);
@@ -1389,7 +1393,8 @@ FWCfgState *pc_memory_init(PCMachineState *pcms,
                                         option_rom_mr,
                                         1);
 
-    fw_cfg = bochs_bios_init();
+    fw_cfg = bochs_bios_init(&address_space_memory);
+
     rom_set_fw(fw_cfg);
 
     if (guest_info->has_reserved_memory && pcms->hotplug_memory.base) {
@@ -1611,7 +1616,6 @@ static void pc_dimm_plug(HotplugHandler *hotplug_dev,
     HotplugHandlerClass *hhc;
     Error *local_err = NULL;
     PCMachineState *pcms = PC_MACHINE(hotplug_dev);
-    PCMachineClass *pcmc = PC_MACHINE_GET_CLASS(pcms);
     PCDIMMDevice *dimm = PC_DIMM(dev);
     PCDIMMDeviceClass *ddc = PC_DIMM_GET_CLASS(dimm);
     MemoryRegion *mr = ddc->get_memory_region(dimm);
@@ -1627,8 +1631,7 @@ static void pc_dimm_plug(HotplugHandler *hotplug_dev,
         goto out;
     }
 
-    pc_dimm_memory_plug(dev, &pcms->hotplug_memory, mr, align,
-                        pcmc->inter_dimm_gap, &local_err);
+    pc_dimm_memory_plug(dev, &pcms->hotplug_memory, mr, align, &local_err);
     if (local_err) {
         goto out;
     }
@@ -1948,7 +1951,6 @@ static void pc_machine_class_init(ObjectClass *oc, void *data)
     PCMachineClass *pcmc = PC_MACHINE_CLASS(oc);
     HotplugHandlerClass *hc = HOTPLUG_HANDLER_CLASS(oc);
 
-    pcmc->inter_dimm_gap = true;
     pcmc->get_hotplug_handler = mc->get_hotplug_handler;
     mc->get_hotplug_handler = pc_get_hotpug_handler;
     mc->cpu_index_to_socket_id = pc_cpu_index_to_socket_id;

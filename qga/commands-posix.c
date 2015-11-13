@@ -28,6 +28,7 @@
 #include "qapi/qmp/qerror.h"
 #include "qemu/queue.h"
 #include "qemu/host-utils.h"
+#include "qemu/sockets.h"
 
 #ifndef CONFIG_HAS_ENVIRON
 #ifdef __APPLE__
@@ -223,7 +224,9 @@ typedef struct GuestFileHandle {
 
 static struct {
     QTAILQ_HEAD(, GuestFileHandle) filehandles;
-} guest_file_state;
+} guest_file_state = {
+    .filehandles = QTAILQ_HEAD_INITIALIZER(guest_file_state.filehandles),
+};
 
 static int64_t guest_file_handle_add(FILE *fh, Error **errp)
 {
@@ -235,7 +238,7 @@ static int64_t guest_file_handle_add(FILE *fh, Error **errp)
         return -1;
     }
 
-    gfh = g_malloc0(sizeof(GuestFileHandle));
+    gfh = g_new0(GuestFileHandle, 1);
     gfh->id = handle;
     gfh->fh = fh;
     QTAILQ_INSERT_TAIL(&guest_file_state.filehandles, gfh, next);
@@ -383,27 +386,6 @@ safe_open_or_create(const char *path, const char *mode, Error **errp)
     return NULL;
 }
 
-static int guest_file_toggle_flags(int fd, int flags, bool set, Error **err)
-{
-    int ret, old_flags;
-
-    old_flags = fcntl(fd, F_GETFL);
-    if (old_flags == -1) {
-        error_setg_errno(err, errno, QERR_QGA_COMMAND_FAILED,
-                         "failed to fetch filehandle flags");
-        return -1;
-    }
-
-    ret = fcntl(fd, F_SETFL, set ? (old_flags | flags) : (old_flags & ~flags));
-    if (ret == -1) {
-        error_setg_errno(err, errno, QERR_QGA_COMMAND_FAILED,
-                         "failed to set filehandle flags");
-        return -1;
-    }
-
-    return ret;
-}
-
 int64_t qmp_guest_file_open(const char *path, bool has_mode, const char *mode,
                             Error **errp)
 {
@@ -424,10 +406,7 @@ int64_t qmp_guest_file_open(const char *path, bool has_mode, const char *mode,
     /* set fd non-blocking to avoid common use cases (like reading from a
      * named pipe) from hanging the agent
      */
-    if (guest_file_toggle_flags(fileno(fh), O_NONBLOCK, true, errp) < 0) {
-        fclose(fh);
-        return -1;
-    }
+    qemu_set_nonblock(fileno(fh));
 
     handle = guest_file_handle_add(fh, errp);
     if (handle < 0) {
@@ -488,7 +467,7 @@ struct GuestFileRead *qmp_guest_file_read(int64_t handle, bool has_count,
         slog("guest-file-read failed, handle: %" PRId64, handle);
     } else {
         buf[read_count] = 0;
-        read_data = g_malloc0(sizeof(GuestFileRead));
+        read_data = g_new0(GuestFileRead, 1);
         read_data->count = read_count;
         read_data->eof = feof(fh);
         if (read_count) {
@@ -533,7 +512,7 @@ GuestFileWrite *qmp_guest_file_write(int64_t handle, const char *buf_b64,
         error_setg_errno(errp, errno, "failed to write to file");
         slog("guest-file-write failed, handle: %" PRId64, handle);
     } else {
-        write_data = g_malloc0(sizeof(GuestFileWrite));
+        write_data = g_new0(GuestFileWrite, 1);
         write_data->count = write_count;
         write_data->eof = feof(fh);
     }
@@ -584,11 +563,6 @@ void qmp_guest_file_flush(int64_t handle, Error **errp)
     if (ret == EOF) {
         error_setg_errno(errp, errno, "failed to flush file");
     }
-}
-
-static void guest_file_init(void)
-{
-    QTAILQ_INIT(&guest_file_state.filehandles);
 }
 
 /* linux-specific implementations. avoid this if at all possible. */
@@ -678,7 +652,7 @@ static void build_fs_mount_list_from_mtab(FsMountList *mounts, Error **errp)
             continue;
         }
 
-        mount = g_malloc0(sizeof(FsMount));
+        mount = g_new0(FsMount, 1);
         mount->dirname = g_strdup(ment->mnt_dir);
         mount->devtype = g_strdup(ment->mnt_type);
         mount->devmajor = devmajor;
@@ -757,7 +731,7 @@ static void build_fs_mount_list(FsMountList *mounts, Error **errp)
             }
         }
 
-        mount = g_malloc0(sizeof(FsMount));
+        mount = g_new0(FsMount, 1);
         mount->dirname = g_strdup(line + dir_s);
         mount->devtype = g_strdup(dash + type_s);
         mount->devmajor = devmajor;
@@ -2213,8 +2187,14 @@ GuestMemoryBlockList *qmp_guest_get_memory_blocks(Error **errp)
 
     dp = opendir("/sys/devices/system/memory/");
     if (!dp) {
-        error_setg_errno(errp, errno, "Can't open directory"
-                         "\"/sys/devices/system/memory/\"\n");
+        /* it's ok if this happens to be a system that doesn't expose
+         * memory blocks via sysfs, but otherwise we should report
+         * an error
+         */
+        if (errno != ENOENT) {
+            error_setg_errno(errp, errno, "Can't open directory"
+                             "\"/sys/devices/system/memory/\"\n");
+        }
         return NULL;
     }
 
@@ -2486,5 +2466,4 @@ void ga_command_state_init(GAState *s, GACommandState *cs)
 #if defined(CONFIG_FSFREEZE)
     ga_command_state_add(cs, NULL, guest_fsfreeze_cleanup);
 #endif
-    ga_command_state_add(cs, guest_file_init, NULL);
 }

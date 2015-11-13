@@ -17,6 +17,9 @@ object :obj-anyList-wrapper
     member data: anyList optional=False
 object :obj-boolList-wrapper
     member data: boolList optional=False
+object :obj-guest-get-time-arg
+    member a: int optional=False
+    member b: int optional=True
 object :obj-guest-sync-arg
     member arg: any optional=False
 object :obj-int16List-wrapper
@@ -50,18 +53,47 @@ object :obj-user_def_cmd1-arg
 object :obj-user_def_cmd2-arg
     member ud1a: UserDefOne optional=False
     member ud1b: UserDefOne optional=True
-object :obj-user_def_cmd3-arg
-    member a: int optional=False
-    member b: int optional=True
+alternate AltIntNum
+    case i: int
+    case n: number
+enum AltIntNumKind ['i', 'n']
+alternate AltNumInt
+    case n: number
+    case i: int
+enum AltNumIntKind ['n', 'i']
+alternate AltNumStr
+    case n: number
+    case s: str
+enum AltNumStrKind ['n', 's']
+alternate AltStrBool
+    case s: str
+    case b: bool
+enum AltStrBoolKind ['s', 'b']
+alternate AltStrInt
+    case s: str
+    case i: int
+enum AltStrIntKind ['s', 'i']
+alternate AltStrNum
+    case s: str
+    case n: number
+enum AltStrNumKind ['s', 'n']
 event EVENT_A None
 event EVENT_B None
 event EVENT_C :obj-EVENT_C-arg
 event EVENT_D :obj-EVENT_D-arg
+object Empty1
+object Empty2
+    base Empty1
 enum EnumOne ['value1', 'value2', 'value3']
 object EventStructOne
     member struct1: UserDefOne optional=False
     member string: str optional=False
     member enum2: EnumOne optional=True
+object ForceArrays
+    member unused1: UserDefOneList optional=False
+    member unused2: UserDefTwoList optional=False
+    member unused3: TestStructList optional=False
+enum MyEnum []
 object NestedEnumsOne
     member enum1: EnumOne optional=False
     member enum2: EnumOne optional=True
@@ -69,8 +101,13 @@ object NestedEnumsOne
     member enum4: EnumOne optional=True
 enum QEnumTwo ['value1', 'value2']
     prefix QENUM_TWO
+object TestStruct
+    member integer: int optional=False
+    member boolean: bool optional=False
+    member string: str optional=False
 object UserDefA
     member boolean: bool optional=False
+    member a_b: int optional=True
 alternate UserDefAlternate
     case uda: UserDefA
     case s: str
@@ -78,6 +115,7 @@ alternate UserDefAlternate
 enum UserDefAlternateKind ['uda', 's', 'i']
 object UserDefB
     member intb: int optional=False
+    member a-b: bool optional=True
 object UserDefC
     member string1: str optional=False
     member string2: str optional=False
@@ -157,6 +195,8 @@ object __org.qemu_x-Union2
     case __org.qemu_x-value: __org.qemu_x-Struct2
 command __org.qemu_x-command :obj-__org.qemu_x-command-arg -> __org.qemu_x-Union1
    gen=True success_response=True
+command guest-get-time :obj-guest-get-time-arg -> int
+   gen=True success_response=True
 command guest-sync :obj-guest-sync-arg -> any
    gen=True success_response=True
 command user_def_cmd None -> None
@@ -164,6 +204,4 @@ command user_def_cmd None -> None
 command user_def_cmd1 :obj-user_def_cmd1-arg -> None
    gen=True success_response=True
 command user_def_cmd2 :obj-user_def_cmd2-arg -> UserDefTwo
-   gen=True success_response=True
-command user_def_cmd3 :obj-user_def_cmd3-arg -> int
    gen=True success_response=True

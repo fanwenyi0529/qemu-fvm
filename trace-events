@@ -139,8 +139,8 @@ paio_submit_co(int64_t sector_num, int nb_sectors, int type) "sector_num %"PRId6
 paio_submit(void *acb, void *opaque, int64_t sector_num, int nb_sectors, int type) "acb %p opaque %p sector_num %"PRId64" nb_sectors %d type %d"
 
 # ioport.c
-cpu_in(unsigned int addr, unsigned int val) "addr %#x value %u"
-cpu_out(unsigned int addr, unsigned int val) "addr %#x value %u"
+cpu_in(unsigned int addr, char size, unsigned int val) "addr %#x(%c) value %u"
+cpu_out(unsigned int addr, char size, unsigned int val) "addr %#x(%c) value %u"
 
 # balloon.c
 # Since requests are raised via monitor, not many tracepoints are needed.
@@ -603,9 +603,6 @@ scsi_request_sense(int target, int lun, int tag) "target %d lun %d tag %d"
 vm_state_notify(int running, int reason) "running %d reason %d"
 load_file(const char *name, const char *path) "name %s location %s"
 runstate_set(int new_state) "new state %d"
-g_malloc(size_t size, void *ptr) "size %zu ptr %p"
-g_realloc(void *ptr, size_t size, void *newptr) "ptr %p size %zu newptr %p"
-g_free(void *ptr) "ptr %p"
 system_wakeup_request(int reason) "reason=%d"
 qemu_system_shutdown_request(void) ""
 qemu_system_powerdown_request(void) ""
@@ -1034,9 +1031,9 @@ esp_pci_sbac_write(uint32_t reg, uint32_t val) "sbac: 0x%8.8x -> 0x%8.8x"
 # monitor.c
 handle_qmp_command(void *mon, const char *cmd_name) "mon %p cmd_name \"%s\""
 monitor_protocol_emitter(void *mon) "mon %p"
-monitor_protocol_event_handler(uint32_t event, void *data, uint64_t last, uint64_t now) "event=%d data=%p last=%" PRId64 " now=%" PRId64
+monitor_protocol_event_handler(uint32_t event, void *qdict) "event=%d data=%p"
 monitor_protocol_event_emit(uint32_t event, void *data) "event=%d data=%p"
-monitor_protocol_event_queue(uint32_t event, void *data, uint64_t rate, uint64_t last, uint64_t now) "event=%d data=%p rate=%" PRId64 " last=%" PRId64 " now=%" PRId64
+monitor_protocol_event_queue(uint32_t event, void *qdict, uint64_t rate) "event=%d data=%p rate=%" PRId64
 monitor_protocol_event_throttle(uint32_t event, uint64_t rate) "event=%d rate=%" PRId64
 
 # hw/net/opencores_eth.c
@@ -1181,6 +1178,7 @@ vmware_scratch_write(uint32_t index, uint32_t value) "index %d, value 0x%x"
 vmware_setmode(uint32_t w, uint32_t h, uint32_t bpp) "%dx%d @ %d bpp"
 
 # hw/display/virtio-gpu.c
+virtio_gpu_features(bool virgl) "virgl %d"
 virtio_gpu_cmd_get_display_info(void) ""
 virtio_gpu_cmd_get_caps(void) ""
 virtio_gpu_cmd_set_scanout(uint32_t id, uint32_t res, uint32_t w, uint32_t h, uint32_t x, uint32_t y) "id %d, res 0x%x, w %d, h %d, x %d, y %d"
@@ -1190,7 +1188,15 @@ virtio_gpu_cmd_res_unref(uint32_t res) "res 0x%x"
 virtio_gpu_cmd_res_back_attach(uint32_t res) "res 0x%x"
 virtio_gpu_cmd_res_back_detach(uint32_t res) "res 0x%x"
 virtio_gpu_cmd_res_xfer_toh_2d(uint32_t res) "res 0x%x"
+virtio_gpu_cmd_res_xfer_toh_3d(uint32_t res) "res 0x%x"
+virtio_gpu_cmd_res_xfer_fromh_3d(uint32_t res) "res 0x%x"
 virtio_gpu_cmd_res_flush(uint32_t res, uint32_t w, uint32_t h, uint32_t x, uint32_t y) "res 0x%x, w %d, h %d, x %d, y %d"
+virtio_gpu_cmd_ctx_create(uint32_t ctx, const char *name) "ctx 0x%x, name %s"
+virtio_gpu_cmd_ctx_destroy(uint32_t ctx) "ctx 0x%x"
+virtio_gpu_cmd_ctx_res_attach(uint32_t ctx, uint32_t res) "ctx 0x%x, res 0x%x"
+virtio_gpu_cmd_ctx_res_detach(uint32_t ctx, uint32_t res) "ctx 0x%x, res 0x%x"
+virtio_gpu_cmd_ctx_submit(uint32_t ctx, uint32_t size) "ctx 0x%x, size %d"
+virtio_gpu_update_cursor(uint32_t scanout, uint32_t x, uint32_t y, const char *type, uint32_t res) "scanout %d, x %d, y %d, %s, res 0x%x"
 virtio_gpu_fence_ctrl(uint64_t fence, uint32_t type) "fence 0x%" PRIx64 ", type 0x%x"
 virtio_gpu_fence_resp(uint64_t fence) "fence 0x%" PRIx64
 
@@ -1205,7 +1211,7 @@ savevm_state_begin(void) ""
 savevm_state_header(void) ""
 savevm_state_iterate(void) ""
 savevm_state_complete(void) ""
-savevm_state_cancel(void) ""
+savevm_state_cleanup(void) ""
 vmstate_save(const char *idstr, const char *vmsd_name) "%s, %s"
 vmstate_load(const char *idstr, const char *vmsd_name) "%s, %s"
 qemu_announce_self_iter(const char *mac) "%s"
@@ -1376,6 +1382,10 @@ spapr_iommu_new_table(uint64_t liobn, void *tcet, void *table, int fd) "liobn=%"
 
 # hw/ppc/ppc.c
 ppc_tb_adjust(uint64_t offs1, uint64_t offs2, int64_t diff, int64_t seconds) "adjusted from 0x%"PRIx64" to 0x%"PRIx64", diff %"PRId64" (%"PRId64"s)"
+
+# hw/ppc/prep.c
+prep_io_800_writeb(uint32_t addr, uint32_t val) "0x%08" PRIx32 " => 0x%02" PRIx32
+prep_io_800_readb(uint32_t addr, uint32_t retval) "0x%08" PRIx32 " <= 0x%02" PRIx32
 
 # util/hbitmap.c
 hbitmap_iter_skip_words(const void *hb, void *hbi, uint64_t pos, unsigned long cur) "hb %p hbi %p pos %"PRId64" cur 0x%lx"
@@ -1699,3 +1709,6 @@ qcrypto_tls_creds_x509_load_cert_list(void *creds, const char *file) "TLS creds 
 
 # crypto/tlssession.c
 qcrypto_tls_session_new(void *session, void *creds, const char *hostname, const char *aclname, int endpoint) "TLS session new session=%p creds=%p hostname=%s aclname=%s endpoint=%d"
+
+# net/vhost-user.c
+vhost_user_event(const char *chr, int event) "chr: %s got event: %d"

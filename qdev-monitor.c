@@ -50,6 +50,7 @@ static const QDevAlias qdev_alias_table[] = {
     { "lsi53c895a", "lsi" },
     { "ich9-ahci", "ahci" },
     { "kvm-pci-assign", "pci-assign" },
+    { "e1000", "e1000-82540em" },
     { }
 };
 
@@ -237,9 +238,12 @@ int qdev_device_help(QemuOpts *opts)
         return 0;
     }
 
-    qdev_get_device_class(&driver, &local_err);
-    if (local_err) {
-        goto error;
+    if (!object_class_by_name(driver)) {
+        const char *typename = find_typename_by_alias(driver);
+
+        if (typename) {
+            driver = typename;
+        }
     }
 
     prop_list = qmp_device_list_properties(driver, &local_err);

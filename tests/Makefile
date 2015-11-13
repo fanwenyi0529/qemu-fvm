@@ -80,11 +80,15 @@ check-unit-$(CONFIG_GNUTLS_HASH) += tests/test-crypto-hash$(EXESUF)
 check-unit-y += tests/test-crypto-cipher$(EXESUF)
 check-unit-$(CONFIG_GNUTLS) += tests/test-crypto-tlscredsx509$(EXESUF)
 check-unit-$(CONFIG_GNUTLS) += tests/test-crypto-tlssession$(EXESUF)
+check-unit-$(CONFIG_LINUX) += tests/test-qga$(EXESUF)
 
 check-block-$(CONFIG_POSIX) += tests/qemu-iotests-quick.sh
 
 # All QTests for now are POSIX-only, but the dependencies are
 # really in libqtest, not in the testcases themselves.
+
+check-qtest-generic-y = tests/device-introspect-test$(EXESUF)
+gcov-files-generic-y = qdev-monitor.c qmp.c
 
 gcov-files-ipack-y += hw/ipack/ipack.c
 check-qtest-ipack-y += tests/ipoctal232-test$(EXESUF)
@@ -146,6 +150,8 @@ gcov-files-pci-y += hw/display/virtio-gpu-pci.c
 gcov-files-pci-$(CONFIG_VIRTIO_VGA) += hw/display/virtio-vga.c
 check-qtest-pci-y += tests/intel-hda-test$(EXESUF)
 gcov-files-pci-y += hw/audio/intel-hda.c hw/audio/hda-codec.c
+check-qtest-pci-$(CONFIG_POSIX) += tests/ivshmem-test$(EXESUF)
+gcov-files-pci-y += hw/misc/ivshmem.c
 
 check-qtest-i386-y = tests/endianness-test$(EXESUF)
 check-qtest-i386-y += tests/fdc-test$(EXESUF)
@@ -191,6 +197,7 @@ gcov-files-i386-y += hw/pci-host/q35.c
 ifeq ($(CONFIG_VHOST_NET),y)
 check-qtest-i386-$(CONFIG_LINUX) += tests/vhost-user-test$(EXESUF)
 endif
+check-qtest-i386-y += tests/test-netfilter$(EXESUF)
 check-qtest-x86_64-y = $(check-qtest-i386-y)
 gcov-files-i386-y += i386-softmmu/hw/timer/mc146818rtc.c
 gcov-files-x86_64-y = $(subst i386-softmmu/,x86_64-softmmu/,$(gcov-files-i386-y))
@@ -218,57 +225,131 @@ gcov-files-ppc64-y += ppc64-softmmu/hw/ppc/spapr_pci.c
 check-qtest-microblazeel-y = $(check-qtest-microblaze-y)
 check-qtest-xtensaeb-y = $(check-qtest-xtensa-y)
 
-# qom-test works for all sysemu architectures:
-$(foreach target,$(SYSEMU_TARGET_LIST), \
-	$(if $(findstring tests/qom-test$(EXESUF), $(check-qtest-$(target)-y)),, \
-		$(eval check-qtest-$(target)-y += tests/qom-test$(EXESUF))))
+check-qtest-generic-y += tests/qom-test$(EXESUF)
 
-check-qapi-schema-y := $(addprefix tests/qapi-schema/, \
-	comments.json empty.json enum-empty.json enum-missing-data.json \
-	enum-wrong-data.json enum-int-member.json enum-dict-member.json \
-	enum-clash-member.json enum-max-member.json enum-union-clash.json \
-	enum-bad-name.json enum-bad-prefix.json \
-	funny-char.json indented-expr.json \
-	missing-type.json bad-ident.json ident-with-escape.json \
-	escape-outside-string.json unknown-escape.json \
-	escape-too-short.json escape-too-big.json unicode-str.json \
-	double-type.json bad-base.json bad-type-bool.json bad-type-int.json \
-	bad-type-dict.json double-data.json unknown-expr-key.json \
-	redefined-type.json redefined-command.json redefined-builtin.json \
-	redefined-event.json command-int.json bad-data.json event-max.json \
-	type-bypass-bad-gen.json \
-	args-invalid.json \
-	args-array-empty.json args-array-unknown.json args-int.json \
-	args-unknown.json args-member-unknown.json args-member-array.json \
-	args-member-array-bad.json args-alternate.json args-union.json \
-	args-any.json \
-	returns-array-bad.json returns-int.json returns-dict.json \
-	returns-unknown.json returns-alternate.json returns-whitelist.json \
-	missing-colon.json missing-comma-list.json missing-comma-object.json \
-	struct-data-invalid.json struct-member-invalid.json \
-	nested-struct-data.json non-objects.json \
-	qapi-schema-test.json quoted-structural-chars.json \
-	leading-comma-list.json leading-comma-object.json \
-	trailing-comma-list.json trailing-comma-object.json \
-	unclosed-list.json unclosed-object.json unclosed-string.json \
-	duplicate-key.json union-invalid-base.json union-bad-branch.json \
-	union-optional-branch.json union-unknown.json union-max.json \
-	flat-union-optional-discriminator.json flat-union-no-base.json \
-	flat-union-invalid-discriminator.json flat-union-inline.json \
-	flat-union-invalid-branch-key.json flat-union-reverse-define.json \
-	flat-union-string-discriminator.json union-base-no-discriminator.json \
-	flat-union-bad-discriminator.json flat-union-bad-base.json \
-	flat-union-base-any.json \
-	flat-union-array-branch.json flat-union-int-branch.json \
-	flat-union-base-union.json flat-union-branch-clash.json \
-	alternate-nested.json alternate-unknown.json alternate-clash.json \
-	alternate-good.json alternate-base.json alternate-array.json \
-	alternate-conflict-string.json alternate-conflict-dict.json \
-	include-simple.json include-relpath.json include-format-err.json \
-	include-non-file.json include-no-file.json include-before-err.json \
-	include-nested-err.json include-self-cycle.json include-cycle.json \
-	include-repetition.json event-nest-struct.json event-case.json \
-	struct-base-clash.json struct-base-clash-deep.json )
+qapi-schema += alternate-array.json
+qapi-schema += alternate-base.json
+qapi-schema += alternate-clash.json
+qapi-schema += alternate-conflict-dict.json
+qapi-schema += alternate-conflict-string.json
+qapi-schema += alternate-empty.json
+qapi-schema += alternate-nested.json
+qapi-schema += alternate-unknown.json
+qapi-schema += args-alternate.json
+qapi-schema += args-any.json
+qapi-schema += args-array-empty.json
+qapi-schema += args-array-unknown.json
+qapi-schema += args-int.json
+qapi-schema += args-invalid.json
+qapi-schema += args-member-array-bad.json
+qapi-schema += args-member-unknown.json
+qapi-schema += args-name-clash.json
+qapi-schema += args-union.json
+qapi-schema += args-unknown.json
+qapi-schema += bad-base.json
+qapi-schema += bad-data.json
+qapi-schema += bad-ident.json
+qapi-schema += bad-type-bool.json
+qapi-schema += bad-type-dict.json
+qapi-schema += bad-type-int.json
+qapi-schema += command-int.json
+qapi-schema += comments.json
+qapi-schema += double-data.json
+qapi-schema += double-type.json
+qapi-schema += duplicate-key.json
+qapi-schema += empty.json
+qapi-schema += enum-bad-name.json
+qapi-schema += enum-bad-prefix.json
+qapi-schema += enum-clash-member.json
+qapi-schema += enum-dict-member.json
+qapi-schema += enum-int-member.json
+qapi-schema += enum-max-member.json
+qapi-schema += enum-missing-data.json
+qapi-schema += enum-wrong-data.json
+qapi-schema += escape-outside-string.json
+qapi-schema += escape-too-big.json
+qapi-schema += escape-too-short.json
+qapi-schema += event-case.json
+qapi-schema += event-max.json
+qapi-schema += event-nest-struct.json
+qapi-schema += flat-union-array-branch.json
+qapi-schema += flat-union-bad-base.json
+qapi-schema += flat-union-bad-discriminator.json
+qapi-schema += flat-union-base-any.json
+qapi-schema += flat-union-base-union.json
+qapi-schema += flat-union-clash-branch.json
+qapi-schema += flat-union-clash-member.json
+qapi-schema += flat-union-clash-type.json
+qapi-schema += flat-union-empty.json
+qapi-schema += flat-union-inline.json
+qapi-schema += flat-union-int-branch.json
+qapi-schema += flat-union-invalid-branch-key.json
+qapi-schema += flat-union-invalid-discriminator.json
+qapi-schema += flat-union-no-base.json
+qapi-schema += flat-union-optional-discriminator.json
+qapi-schema += flat-union-string-discriminator.json
+qapi-schema += funny-char.json
+qapi-schema += ident-with-escape.json
+qapi-schema += include-before-err.json
+qapi-schema += include-cycle.json
+qapi-schema += include-format-err.json
+qapi-schema += include-nested-err.json
+qapi-schema += include-no-file.json
+qapi-schema += include-non-file.json
+qapi-schema += include-relpath.json
+qapi-schema += include-repetition.json
+qapi-schema += include-self-cycle.json
+qapi-schema += include-simple.json
+qapi-schema += indented-expr.json
+qapi-schema += leading-comma-list.json
+qapi-schema += leading-comma-object.json
+qapi-schema += missing-colon.json
+qapi-schema += missing-comma-list.json
+qapi-schema += missing-comma-object.json
+qapi-schema += missing-type.json
+qapi-schema += nested-struct-data.json
+qapi-schema += non-objects.json
+qapi-schema += qapi-schema-test.json
+qapi-schema += quoted-structural-chars.json
+qapi-schema += redefined-builtin.json
+qapi-schema += redefined-command.json
+qapi-schema += redefined-event.json
+qapi-schema += redefined-type.json
+qapi-schema += reserved-command-q.json
+qapi-schema += reserved-member-has.json
+qapi-schema += reserved-member-q.json
+qapi-schema += reserved-member-u.json
+qapi-schema += reserved-type-kind.json
+qapi-schema += reserved-type-list.json
+qapi-schema += returns-alternate.json
+qapi-schema += returns-array-bad.json
+qapi-schema += returns-dict.json
+qapi-schema += returns-unknown.json
+qapi-schema += returns-whitelist.json
+qapi-schema += struct-base-clash-deep.json
+qapi-schema += struct-base-clash.json
+qapi-schema += struct-data-invalid.json
+qapi-schema += struct-member-invalid.json
+qapi-schema += trailing-comma-list.json
+qapi-schema += trailing-comma-object.json
+qapi-schema += type-bypass-bad-gen.json
+qapi-schema += unclosed-list.json
+qapi-schema += unclosed-object.json
+qapi-schema += unclosed-string.json
+qapi-schema += unicode-str.json
+qapi-schema += union-bad-branch.json
+qapi-schema += union-base-no-discriminator.json
+qapi-schema += union-clash-branches.json
+qapi-schema += union-clash-data.json
+qapi-schema += union-clash-type.json
+qapi-schema += union-empty.json
+qapi-schema += union-invalid-base.json
+qapi-schema += union-max.json
+qapi-schema += union-optional-branch.json
+qapi-schema += union-unknown.json
+qapi-schema += unknown-escape.json
+qapi-schema += unknown-expr-key.json
+check-qapi-schema-y := $(addprefix tests/qapi-schema/, $(qapi-schema))
 
 GENERATED_HEADERS += tests/test-qapi-types.h tests/test-qapi-visit.h \
 	tests/test-qmp-commands.h tests/test-qapi-event.h \
@@ -369,8 +450,16 @@ tests/test-mul64$(EXESUF): tests/test-mul64.o $(test-util-obj-y)
 tests/test-bitops$(EXESUF): tests/test-bitops.o $(test-util-obj-y)
 tests/test-crypto-hash$(EXESUF): tests/test-crypto-hash.o $(test-crypto-obj-y)
 tests/test-crypto-cipher$(EXESUF): tests/test-crypto-cipher.o $(test-crypto-obj-y)
+
+tests/crypto-tls-x509-helpers.o-cflags := $(TASN1_CFLAGS)
+tests/crypto-tls-x509-helpers.o-libs := $(TASN1_LIBS)
+tests/pkix_asn1_tab.o-cflags := $(TASN1_CFLAGS)
+
+tests/test-crypto-tlscredsx509.o-cflags := $(TASN1_CFLAGS)
 tests/test-crypto-tlscredsx509$(EXESUF): tests/test-crypto-tlscredsx509.o \
 	tests/crypto-tls-x509-helpers.o tests/pkix_asn1_tab.o $(test-crypto-obj-y)
+
+tests/test-crypto-tlssession.o-cflags := $(TASN1_CFLAGS)
 tests/test-crypto-tlssession$(EXESUF): tests/test-crypto-tlssession.o \
 	tests/crypto-tls-x509-helpers.o tests/pkix_asn1_tab.o $(test-crypto-obj-y)
 
@@ -384,6 +473,7 @@ libqos-imx-obj-y = $(libqos-obj-y) tests/libqos/i2c-imx.o
 libqos-usb-obj-y = $(libqos-pc-obj-y) tests/libqos/usb.o
 libqos-virtio-obj-y = $(libqos-pc-obj-y) tests/libqos/virtio.o tests/libqos/virtio-pci.o tests/libqos/virtio-mmio.o tests/libqos/malloc-generic.o
 
+tests/device-introspect-test$(EXESUF): tests/device-introspect-test.o
 tests/rtc-test$(EXESUF): tests/rtc-test.o
 tests/m48t59-test$(EXESUF): tests/m48t59-test.o
 tests/endianness-test$(EXESUF): tests/endianness-test.o
@@ -437,23 +527,29 @@ tests/vhost-user-test$(EXESUF): tests/vhost-user-test.o qemu-char.o qemu-timer.o
 tests/qemu-iotests/socket_scm_helper$(EXESUF): tests/qemu-iotests/socket_scm_helper.o
 tests/test-qemu-opts$(EXESUF): tests/test-qemu-opts.o $(test-util-obj-y)
 tests/test-write-threshold$(EXESUF): tests/test-write-threshold.o $(test-block-obj-y)
+tests/test-netfilter$(EXESUF): tests/test-netfilter.o $(qtest-obj-y)
+tests/ivshmem-test$(EXESUF): tests/ivshmem-test.o contrib/ivshmem-server/ivshmem-server.o $(libqos-pc-obj-y)
+tests/vhost-user-bridge$(EXESUF): tests/vhost-user-bridge.o
 
 ifeq ($(CONFIG_POSIX),y)
 LIBS += -lutil
 endif
-LIBS += $(TEST_LIBS)
-CFLAGS += $(TEST_CFLAGS)
 
 # QTest rules
 
 TARGETS=$(patsubst %-softmmu,%, $(filter %-softmmu,$(TARGET_DIRS)))
-ifdef CONFIG_POSIX
-QTEST_TARGETS=$(foreach TARGET,$(TARGETS), $(if $(check-qtest-$(TARGET)-y), $(TARGET),))
+ifeq ($(CONFIG_POSIX),y)
+QTEST_TARGETS = $(TARGETS)
+check-qtest-y=$(foreach TARGET,$(TARGETS), $(check-qtest-$(TARGET)-y))
+check-qtest-y += $(check-qtest-generic-y)
+else
+QTEST_TARGETS =
 endif
-check-qtest-$(CONFIG_POSIX)=$(foreach TARGET,$(TARGETS), $(check-qtest-$(TARGET)-y))
 
 qtest-obj-y = tests/libqtest.o $(test-util-obj-y)
 $(check-qtest-y): $(qtest-obj-y)
+
+tests/test-qga: tests/test-qga.o $(qtest-obj-y)
 
 .PHONY: check-help
 check-help:
@@ -487,8 +583,8 @@ $(patsubst %, check-qtest-%, $(QTEST_TARGETS)): check-qtest-%: $(check-qtest-y)
 	$(call quiet-command,QTEST_QEMU_BINARY=$*-softmmu/qemu-system-$* \
 		QTEST_QEMU_IMG=qemu-img$(EXESUF) \
 		MALLOC_PERTURB_=$${MALLOC_PERTURB_:-$$((RANDOM % 255 + 1))} \
-		gtester $(GTESTER_OPTIONS) -m=$(SPEED) $(check-qtest-$*-y),"GTESTER $@")
-	$(if $(CONFIG_GCOV),@for f in $(gcov-files-$*-y); do \
+		gtester $(GTESTER_OPTIONS) -m=$(SPEED) $(check-qtest-$*-y) $(check-qtest-generic-y),"GTESTER $@")
+	$(if $(CONFIG_GCOV),@for f in $(gcov-files-$*-y) $(gcov-files-generic-y); do \
 	  echo Gcov report for $$f:;\
 	  $(GCOV) $(GCOV_OPTIONS) $$f -o `dirname $$f`; \
 	done,)
@@ -499,7 +595,7 @@ $(patsubst %, check-%, $(check-unit-y)): check-%: %
 	$(call quiet-command, \
 		MALLOC_PERTURB_=$${MALLOC_PERTURB_:-$$((RANDOM % 255 + 1))} \
 		gtester $(GTESTER_OPTIONS) -m=$(SPEED) $*,"GTESTER $*")
-	$(if $(CONFIG_GCOV),@for f in $(gcov-files-$(subst tests/,,$*)-y); do \
+	$(if $(CONFIG_GCOV),@for f in $(gcov-files-$(subst tests/,,$*)-y) $(gcov-files-generic-y); do \
 	  echo Gcov report for $$f:;\
 	  $(GCOV) $(GCOV_OPTIONS) $$f -o `dirname $$f`; \
 	done,)

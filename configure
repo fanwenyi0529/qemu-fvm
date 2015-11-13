@@ -8,6 +8,9 @@
 CLICOLOR_FORCE= GREP_OPTIONS=
 unset CLICOLOR_FORCE GREP_OPTIONS
 
+# Don't allow CCACHE, if present, to use cached results of compile tests!
+export CCACHE_RECACHE=yes
+
 # Temporary directory used for files created while
 # configure runs. Since it is in the build directory
 # we can safely blow away any previous version of it
@@ -262,6 +265,7 @@ rdma=""
 gprof="no"
 debug_tcg="no"
 debug="no"
+fortify_source=""
 strip_opt="yes"
 tcg_interpreter="no"
 bigendian="no"
@@ -330,9 +334,13 @@ glusterfs_zerofill="no"
 archipelago="no"
 gtk=""
 gtkabi=""
+gtk_gl="no"
 gnutls=""
 gnutls_hash=""
+nettle=""
+gcrypt=""
 vte=""
+virglrenderer=""
 tpm="yes"
 libssh2=""
 vhdx=""
@@ -425,9 +433,6 @@ if test "$debug_info" = "yes"; then
     CFLAGS="-g $CFLAGS"
     LDFLAGS="-g $LDFLAGS"
 fi
-
-test_cflags=""
-test_libs=""
 
 # make source path absolute
 source_path=`cd "$source_path"; pwd`
@@ -815,6 +820,9 @@ for opt do
   --enable-modules)
       modules="yes"
   ;;
+  --disable-modules)
+      modules="no"
+  ;;
   --cpu=*)
   ;;
   --target-list=*) target_list="$optarg"
@@ -904,6 +912,7 @@ for opt do
       debug_tcg="yes"
       debug="yes"
       strip_opt="no"
+      fortify_source="no"
   ;;
   --enable-sparse) sparse="yes"
   ;;
@@ -1141,6 +1150,14 @@ for opt do
   ;;
   --enable-gnutls) gnutls="yes"
   ;;
+  --disable-nettle) nettle="no"
+  ;;
+  --enable-nettle) nettle="yes"
+  ;;
+  --disable-gcrypt) gcrypt="no"
+  ;;
+  --enable-gcrypt) gcrypt="yes"
+  ;;
   --enable-rdma) rdma="yes"
   ;;
   --disable-rdma) rdma="no"
@@ -1150,6 +1167,10 @@ for opt do
   --disable-vte) vte="no"
   ;;
   --enable-vte) vte="yes"
+  ;;
+  --disable-virglrenderer) virglrenderer="no"
+  ;;
+  --enable-virglrenderer) virglrenderer="yes"
   ;;
   --disable-tpm) tpm="no"
   ;;
@@ -1189,18 +1210,14 @@ fi
 
 # Note that if the Python conditional here evaluates True we will exit
 # with status 1 which is a shell 'false' value.
-if ! $python -c 'import sys; sys.exit(sys.version_info < (2,4) or sys.version_info >= (3,))'; then
-  error_exit "Cannot use '$python', Python 2.4 or later is required." \
+if ! $python -c 'import sys; sys.exit(sys.version_info < (2,6) or sys.version_info >= (3,))'; then
+  error_exit "Cannot use '$python', Python 2.6 or later is required." \
       "Note that Python 3 or later is not yet supported." \
       "Use --python=/path/to/python to specify a supported Python."
 fi
 
-# The -B switch was added in Python 2.6.
-# If it is supplied, compiled files are not written.
-# Use it for Python versions which support it.
-if $python -B -c 'import sys; sys.exit(0)' 2>/dev/null; then
-  python="$python -B"
-fi
+# Suppress writing compiled files
+python="$python -B"
 
 case "$cpu" in
     ppc)
@@ -1351,6 +1368,8 @@ disabled with --disable-FEATURE, default is enabled if available:
   sparse          sparse checker
 
   gnutls          GNUTLS cryptography support
+  nettle          nettle cryptography support
+  gcrypt          libgcrypt cryptography support
   sdl             SDL UI
   --with-sdlabi     select preferred SDL ABI 1.2 or 2.0
   gtk             gtk UI
@@ -1358,7 +1377,6 @@ disabled with --disable-FEATURE, default is enabled if available:
   vte             vte support for the gtk UI
   curses          curses UI
   vnc             VNC UI support
-  vnc-tls         TLS encryption for VNC server
   vnc-sasl        SASL encryption for VNC server
   vnc-jpeg        JPEG lossy compression for VNC server
   vnc-png         PNG compression for VNC server
@@ -2285,20 +2303,76 @@ else
     gnutls_hash="no"
 fi
 
-if test "$gnutls_gcrypt" != "no"; then
-    if has "libgcrypt-config"; then
+
+# If user didn't give a --disable/enable-gcrypt flag,
+# then mark as disabled if user requested nettle
+# explicitly, or if gnutls links to nettle
+if test -z "$gcrypt"
+then
+    if test "$nettle" = "yes" || test "$gnutls_nettle" = "yes"
+    then
+        gcrypt="no"
+    fi
+fi
+
+# If user didn't give a --disable/enable-nettle flag,
+# then mark as disabled if user requested gcrypt
+# explicitly, or if gnutls links to gcrypt
+if test -z "$nettle"
+then
+    if test "$gcrypt" = "yes" || test "$gnutls_gcrypt" = "yes"
+    then
+        nettle="no"
+    fi
+fi
+
+has_libgcrypt_config() {
+    if ! has "libgcrypt-config"
+    then
+	return 1
+    fi
+
+    if test -n "$cross_prefix"
+    then
+	host=`libgcrypt-config --host`
+	if test "$host-" != $cross_prefix
+	then
+	    return 1
+	fi
+    fi
+
+    return 0
+}
+
+if test "$gcrypt" != "no"; then
+    if has_libgcrypt_config; then
         gcrypt_cflags=`libgcrypt-config --cflags`
         gcrypt_libs=`libgcrypt-config --libs`
+        # Debian has remove -lgpg-error from libgcrypt-config
+        # as it "spreads unnecessary dependencies" which in
+        # turn breaks static builds...
+        if test "$static" = "yes"
+        then
+            gcrypt_libs="$gcrypt_libs -lgpg-error"
+        fi
         libs_softmmu="$gcrypt_libs $libs_softmmu"
         libs_tools="$gcrypt_libs $libs_tools"
         QEMU_CFLAGS="$QEMU_CFLAGS $gcrypt_cflags"
+        gcrypt="yes"
+        if test -z "$nettle"; then
+           nettle="no"
+        fi
     else
-        feature_not_found "gcrypt" "Install gcrypt devel"
+        if test "$gcrypt" = "yes"; then
+            feature_not_found "gcrypt" "Install gcrypt devel"
+        else
+            gcrypt="no"
+        fi
     fi
 fi
 
 
-if test "$gnutls_nettle" != "no"; then
+if test "$nettle" != "no"; then
     if $pkg_config --exists "nettle"; then
         nettle_cflags=`$pkg_config --cflags nettle`
         nettle_libs=`$pkg_config --libs nettle`
@@ -2306,20 +2380,30 @@ if test "$gnutls_nettle" != "no"; then
         libs_softmmu="$nettle_libs $libs_softmmu"
         libs_tools="$nettle_libs $libs_tools"
         QEMU_CFLAGS="$QEMU_CFLAGS $nettle_cflags"
+        nettle="yes"
     else
-        feature_not_found "nettle" "Install nettle devel"
+        if test "$nettle" = "yes"; then
+            feature_not_found "nettle" "Install nettle devel"
+        else
+            nettle="no"
+        fi
     fi
+fi
+
+if test "$gcrypt" = "yes" && test "$nettle" = "yes"
+then
+    error_exit "Only one of gcrypt & nettle can be enabled"
 fi
 
 ##########################################
 # libtasn1 - only for the TLS creds/session test suite
 
 tasn1=yes
+tasn1_cflags=""
+tasn1_libs=""
 if $pkg_config --exists "libtasn1"; then
     tasn1_cflags=`$pkg_config --cflags libtasn1`
     tasn1_libs=`$pkg_config --libs libtasn1`
-    test_cflags="$test_cflags $tasn1_cflags"
-    test_libs="$test_libs $tasn1_libs"
 else
     tasn1=no
 fi
@@ -3242,28 +3326,17 @@ fi
 libs_softmmu="$libs_softmmu $fdt_libs"
 
 ##########################################
-# opengl probe (for sdl2, milkymist-tmu2)
-
-# GLX probe, used by milkymist-tmu2
-# this is temporary, code will be switched to egl mid-term.
-cat > $TMPC << EOF
-#include <X11/Xlib.h>
-#include <GL/gl.h>
-#include <GL/glx.h>
-int main(void) { glBegin(0); glXQueryVersion(0,0,0); return 0; }
-EOF
-if compile_prog "" "-lGL -lX11" ; then
-  have_glx=yes
-else
-  have_glx=no
-fi
+# opengl probe (for sdl2, gtk, milkymist-tmu2)
 
 if test "$opengl" != "no" ; then
-  opengl_pkgs="gl glesv2 epoxy egl"
-  if $pkg_config $opengl_pkgs x11 && test "$have_glx" = "yes"; then
+  opengl_pkgs="epoxy"
+  if $pkg_config $opengl_pkgs x11; then
     opengl_cflags="$($pkg_config --cflags $opengl_pkgs) $x11_cflags"
     opengl_libs="$($pkg_config --libs $opengl_pkgs) $x11_libs"
     opengl=yes
+    if test "$gtk" = "yes" && $pkg_config --exists "$gtkpackage >= 3.16"; then
+        gtk_gl="yes"
+    fi
   else
     if test "$opengl" = "yes" ; then
       feature_not_found "opengl" "Please install opengl (mesa) devel pkgs: $opengl_pkgs"
@@ -3521,6 +3594,20 @@ fi
 
 if test "$mingw32" = "yes" ; then
   eventfd=yes
+fi
+
+# check if memfd is supported
+memfd=no
+cat > $TMPC << EOF
+#include <sys/memfd.h>
+
+int main(void)
+{
+    return memfd_create("foo", MFD_ALLOW_SEALING);
+}
+EOF
+if compile_prog "" "" ; then
+  memfd=yes
 fi
 
 # check for fallocate
@@ -4012,6 +4099,27 @@ EOF
 fi
 
 ##########################################
+# virgl renderer probe
+
+if test "$virglrenderer" != "no" ; then
+  cat > $TMPC << EOF
+#include <virglrenderer.h>
+int main(void) { virgl_renderer_poll(); return 0; }
+EOF
+  virgl_cflags=$($pkg_config --cflags virglrenderer 2>/dev/null)
+  virgl_libs=$($pkg_config --libs virglrenderer 2>/dev/null)
+  if $pkg_config virglrenderer >/dev/null 2>&1 && \
+     compile_prog "$virgl_cflags" "$virgl_libs" ; then
+    virglrenderer="yes"
+  else
+    if test "$virglrenderer" = "yes" ; then
+      feature_not_found "virglrenderer"
+    fi
+    virglrenderer="no"
+  fi
+fi
+
+##########################################
 # check if we have fdatasync
 
 fdatasync=no
@@ -4338,6 +4446,7 @@ fi
 # check if ccache is interfering with
 # semantic analysis of macros
 
+unset CCACHE_CPP2
 ccache_cpp2=no
 cat > $TMPC << EOF
 static const int Z = 1;
@@ -4361,6 +4470,19 @@ if ! compile_object "-Werror"; then
     ccache_cpp2=yes
 fi
 
+#################################################
+# clang does not support glibc + FORTIFY_SOURCE.
+
+if test "$fortify_source" != "no"; then
+  if echo | $cc -dM -E - | grep __clang__ > /dev/null 2>&1 ; then
+    fortify_source="no";
+  elif echo | $cxx -dM -E - | grep __clang__ > /dev/null 2>&1 ; then
+    fortify_source="no";
+  else
+    fortify_source="yes"
+  fi
+fi
+
 ##########################################
 # End of CC checks
 # After here, no more $cc or $ld runs
@@ -4368,8 +4490,10 @@ fi
 if test "$gcov" = "yes" ; then
   CFLAGS="-fprofile-arcs -ftest-coverage -g $CFLAGS"
   LDFLAGS="-fprofile-arcs -ftest-coverage $LDFLAGS"
-elif test "$debug" = "no" ; then
+elif test "$fortify_source" = "yes" ; then
   CFLAGS="-O2 -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=2 $CFLAGS"
+elif test "$debug" = "no"; then
+  CFLAGS="-O2 $CFLAGS"
 fi
 
 ##########################################
@@ -4436,6 +4560,7 @@ tools=""
 tools="qemu-img\$(EXESUF) qemu-io\$(EXESUF) $tools"
 if [ "$linux" = "yes" -o "$bsd" = "yes" -o "$solaris" = "yes" ] ; then
   tools="qemu-nbd\$(EXESUF) $tools"
+  tools="ivshmem-client\$(EXESUF) ivshmem-server\$(EXESUF) $tools"
 fi
 if test "$softmmu" = yes ; then
   if test "$virtfs" != no ; then
@@ -4455,7 +4580,7 @@ fi
 
 if [ "$guest_agent" != "no" ]; then
   if [ "$linux" = "yes" -o "$bsd" = "yes" -o "$solaris" = "yes" -o "$mingw32" = "yes" ] ; then
-      tools="qemu-ga\$(EXESUF) $tools"
+      tools="qemu-ga $tools"
       guest_agent=yes
   elif [ "$guest_agent" != yes ]; then
       guest_agent=no
@@ -4620,13 +4745,20 @@ fi
 echo "pixman            $pixman"
 echo "SDL support       $sdl"
 echo "GTK support       $gtk"
+echo "GTK GL support    $gtk_gl"
 echo "GNUTLS support    $gnutls"
 echo "GNUTLS hash       $gnutls_hash"
-echo "GNUTLS gcrypt     $gnutls_gcrypt"
-echo "GNUTLS nettle     $gnutls_nettle ${gnutls_nettle+($nettle_version)}"
+if test "$gcrypt" = "yes"; then
+echo "encryption        libgcrypt"
+elif test "$nettle" = "yes"; then
+echo "encryption        nettle ${nettle+($nettle_version)}"
+else
+echo "encryption        none"
+fi
 echo "libtasn1          $tasn1"
 echo "VTE support       $vte"
 echo "curses support    $curses"
+echo "virgl support     $virglrenderer"
 echo "curl support      $curl"
 echo "mingw32 support   $mingw32"
 echo "Audio drivers     $audio_drv_list"
@@ -4906,6 +5038,9 @@ fi
 if test "$eventfd" = "yes" ; then
   echo "CONFIG_EVENTFD=y" >> $config_host_mak
 fi
+if test "$memfd" = "yes" ; then
+  echo "CONFIG_MEMFD=y" >> $config_host_mak
+fi
 if test "$fallocate" = "yes" ; then
   echo "CONFIG_FALLOCATE=y" >> $config_host_mak
 fi
@@ -4983,6 +5118,9 @@ if test "$gtk" = "yes" ; then
   echo "CONFIG_GTK=y" >> $config_host_mak
   echo "CONFIG_GTKABI=$gtkabi" >> $config_host_mak
   echo "GTK_CFLAGS=$gtk_cflags" >> $config_host_mak
+  if test "$gtk_gl" = "yes" ; then
+    echo "CONFIG_GTK_GL=y" >> $config_host_mak
+  fi
 fi
 if test "$gnutls" = "yes" ; then
   echo "CONFIG_GNUTLS=y" >> $config_host_mak
@@ -4990,11 +5128,11 @@ fi
 if test "$gnutls_hash" = "yes" ; then
   echo "CONFIG_GNUTLS_HASH=y" >> $config_host_mak
 fi
-if test "$gnutls_gcrypt" = "yes" ; then
-  echo "CONFIG_GNUTLS_GCRYPT=y" >> $config_host_mak
+if test "$gcrypt" = "yes" ; then
+  echo "CONFIG_GCRYPT=y" >> $config_host_mak
 fi
-if test "$gnutls_nettle" = "yes" ; then
-  echo "CONFIG_GNUTLS_NETTLE=y" >> $config_host_mak
+if test "$nettle" = "yes" ; then
+  echo "CONFIG_NETTLE=y" >> $config_host_mak
   echo "CONFIG_NETTLE_VERSION_MAJOR=${nettle_version%%.*}" >> $config_host_mak
 fi
 if test "$tasn1" = "yes" ; then
@@ -5003,6 +5141,11 @@ fi
 if test "$vte" = "yes" ; then
   echo "CONFIG_VTE=y" >> $config_host_mak
   echo "VTE_CFLAGS=$vte_cflags" >> $config_host_mak
+fi
+if test "$virglrenderer" = "yes" ; then
+  echo "CONFIG_VIRGL=y" >> $config_host_mak
+  echo "VIRGL_CFLAGS=$virgl_cflags" >> $config_host_mak
+  echo "VIRGL_LIBS=$virgl_libs" >> $config_host_mak
 fi
 if test "$xen" = "yes" ; then
   echo "CONFIG_XEN_BACKEND=y" >> $config_host_mak
@@ -5324,8 +5467,8 @@ echo "EXESUF=$EXESUF" >> $config_host_mak
 echo "DSOSUF=$DSOSUF" >> $config_host_mak
 echo "LDFLAGS_SHARED=$LDFLAGS_SHARED" >> $config_host_mak
 echo "LIBS_QGA+=$libs_qga" >> $config_host_mak
-echo "TEST_LIBS=$test_libs" >> $config_host_mak
-echo "TEST_CFLAGS=$test_cflags" >> $config_host_mak
+echo "TASN1_LIBS=$tasn1_libs" >> $config_host_mak
+echo "TASN1_CFLAGS=$tasn1_cflags" >> $config_host_mak
 echo "POD2MAN=$POD2MAN" >> $config_host_mak
 echo "TRANSLATE_OPT_CFLAGS=$TRANSLATE_OPT_CFLAGS" >> $config_host_mak
 if test "$gcov" = "yes" ; then
