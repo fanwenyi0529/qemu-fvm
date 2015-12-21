@@ -254,10 +254,16 @@ static void prop_get_fdt(Object *obj, Visitor *v, void *opaque,
                         const char *name, Error **errp)
 {
     sPAPRDRConnector *drc = SPAPR_DR_CONNECTOR(obj);
+    Error *err = NULL;
     int fdt_offset_next, fdt_offset, fdt_depth;
     void *fdt;
 
     if (!drc->fdt) {
+        visit_start_struct(v, NULL, NULL, name, 0, &err);
+        if (!err) {
+            visit_end_struct(v, &err);
+        }
+        error_propagate(errp, err);
         return;
     }
 
@@ -276,24 +282,43 @@ static void prop_get_fdt(Object *obj, Visitor *v, void *opaque,
         case FDT_BEGIN_NODE:
             fdt_depth++;
             name = fdt_get_name(fdt, fdt_offset, &name_len);
-            visit_start_struct(v, NULL, NULL, name, 0, NULL);
+            visit_start_struct(v, NULL, NULL, name, 0, &err);
+            if (err) {
+                error_propagate(errp, err);
+                return;
+            }
             break;
         case FDT_END_NODE:
             /* shouldn't ever see an FDT_END_NODE before FDT_BEGIN_NODE */
             g_assert(fdt_depth > 0);
-            visit_end_struct(v, NULL);
+            visit_end_struct(v, &err);
+            if (err) {
+                error_propagate(errp, err);
+                return;
+            }
             fdt_depth--;
             break;
         case FDT_PROP: {
             int i;
             prop = fdt_get_property_by_offset(fdt, fdt_offset, &prop_len);
             name = fdt_string(fdt, fdt32_to_cpu(prop->nameoff));
-            visit_start_list(v, name, NULL);
-            for (i = 0; i < prop_len; i++) {
-                visit_type_uint8(v, (uint8_t *)&prop->data[i], NULL, NULL);
-
+            visit_start_list(v, name, &err);
+            if (err) {
+                error_propagate(errp, err);
+                return;
             }
-            visit_end_list(v, NULL);
+            for (i = 0; i < prop_len; i++) {
+                visit_type_uint8(v, (uint8_t *)&prop->data[i], NULL, &err);
+                if (err) {
+                    error_propagate(errp, err);
+                    return;
+                }
+            }
+            visit_end_list(v, &err);
+            if (err) {
+                error_propagate(errp, err);
+                return;
+            }
             break;
         }
         default:
@@ -574,6 +599,10 @@ static void spapr_dr_connector_class_init(ObjectClass *k, void *data)
     drck->attach = attach;
     drck->detach = detach;
     drck->release_pending = release_pending;
+    /*
+     * Reason: it crashes FIXME find and document the real reason
+     */
+    dk->cannot_instantiate_with_device_add_yet = true;
 }
 
 static const TypeInfo spapr_dr_connector_info = {
@@ -657,6 +686,7 @@ int spapr_drc_populate_dt(void *fdt, int fdt_offset, Object *owner,
 {
     Object *root_container;
     ObjectProperty *prop;
+    ObjectPropertyIterator *iter;
     uint32_t drc_count = 0;
     GArray *drc_indexes, *drc_power_domains;
     GString *drc_names, *drc_types;
@@ -680,7 +710,8 @@ int spapr_drc_populate_dt(void *fdt, int fdt_offset, Object *owner,
      */
     root_container = container_get(object_get_root(), DRC_CONTAINER_PATH);
 
-    QTAILQ_FOREACH(prop, &root_container->properties, node) {
+    iter = object_property_iter_init(root_container);
+    while ((prop = object_property_iter_next(iter))) {
         Object *obj;
         sPAPRDRConnector *drc;
         sPAPRDRConnectorClass *drck;
@@ -721,6 +752,7 @@ int spapr_drc_populate_dt(void *fdt, int fdt_offset, Object *owner,
                                     spapr_drc_get_type_str(drc->type));
         drc_types = g_string_insert_len(drc_types, -1, "\0", 1);
     }
+    object_property_iter_free(iter);
 
     /* now write the drc count into the space we reserved at the
      * beginning of the arrays previously
