@@ -2447,11 +2447,11 @@ bool kvm_device_supported(int vmfd, uint64_t type)
         .flags = KVM_CREATE_DEVICE_TEST,
     };
 
-    if (ioctl(vmfd, KVM_CHECK_EXTENSION, KVM_CAP_DEVICE_CTRL) <= 0) {
+    if (vmmr3_vm_ioctl(vmfd, KVM_CHECK_EXTENSION, (void*)KVM_CAP_DEVICE_CTRL) <= 0) {
         return false;
     }
 
-    return (ioctl(vmfd, KVM_CREATE_DEVICE, &create_dev) >= 0);
+    return (vmmr3_vm_ioctl(vmfd, KVM_CREATE_DEVICE, &create_dev) >= 0);
 }
 
 int kvm_set_one_reg(CPUState *cs, uint64_t id, void *source)
