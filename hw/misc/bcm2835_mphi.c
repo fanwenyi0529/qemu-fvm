@@ -3,6 +3,7 @@
  * This code is licensed under the GNU GPLv2 and later.
  */
 
+#include "qemu/osdep.h"
 #include "hw/misc/bcm2835_mphi.h"
 
 static void bcm2835_mphi_update_irq(BCM2835MphiState *s)

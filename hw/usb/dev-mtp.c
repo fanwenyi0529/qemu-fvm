@@ -9,14 +9,15 @@
  * This code is licensed under the GPL v2 or later.
  */
 
+#include "qemu/osdep.h"
+#include "qapi/error.h"
 #include <wchar.h>
 #include <dirent.h>
-#include <unistd.h>
 
-#include <sys/stat.h>
 #include <sys/statvfs.h>
-#ifdef __linux__
+#ifdef CONFIG_INOTIFY1
 #include <sys/inotify.h>
+#include "qapi/error.h"
 #include "qemu/main-loop.h"
 #endif
 
@@ -93,7 +94,7 @@ enum {
     EP_EVENT,
 };
 
-#ifdef __linux__
+#ifdef CONFIG_INOTIFY1
 typedef struct MTPMonEntry MTPMonEntry;
 
 struct MTPMonEntry {
@@ -128,7 +129,7 @@ struct MTPObject {
     char         *name;
     char         *path;
     struct stat  stat;
-#ifdef __linux__
+#ifdef CONFIG_INOTIFY1
     /* inotify watch cookie */
     int          watchfd;
 #endif
@@ -153,7 +154,7 @@ struct MTPState {
     uint32_t     next_handle;
 
     QTAILQ_HEAD(, MTPObject) objects;
-#ifdef __linux__
+#ifdef CONFIG_INOTIFY1
     /* inotify descriptor */
     int          inotifyfd;
     QTAILQ_HEAD(events, MTPMonEntry) events;
@@ -401,7 +402,7 @@ static MTPObject *usb_mtp_add_child(MTPState *s, MTPObject *o,
     return child;
 }
 
-#ifdef __linux__
+#ifdef CONFIG_INOTIFY1
 static MTPObject *usb_mtp_object_lookup_name(MTPObject *parent,
                                              char *name, int len)
 {
@@ -434,12 +435,11 @@ static void inotify_watchfn(void *arg)
     MTPState *s = arg;
     ssize_t bytes;
     /* From the man page: atleast one event can be read */
-    int len = sizeof(struct inotify_event) + NAME_MAX + 1;
     int pos;
-    char buf[len];
+    char buf[sizeof(struct inotify_event) + NAME_MAX + 1];
 
     for (;;) {
-        bytes = read(s->inotifyfd, buf, len);
+        bytes = read(s->inotifyfd, buf, sizeof(buf));
         pos = 0;
 
         if (bytes <= 0) {
@@ -594,7 +594,7 @@ static void usb_mtp_object_readdir(MTPState *s, MTPObject *o)
     if (!dir) {
         return;
     }
-#ifdef __linux__
+#ifdef CONFIG_INOTIFY1
     int watchfd = usb_mtp_add_watch(s->inotifyfd, o->path);
     if (watchfd == -1) {
         fprintf(stderr, "usb-mtp: failed to add watch for %s\n", o->path);
@@ -719,7 +719,7 @@ static void usb_mtp_add_wstr(MTPData *data, const wchar_t *str)
 static void usb_mtp_add_str(MTPData *data, const char *str)
 {
     uint32_t len = strlen(str)+1;
-    wchar_t wstr[len];
+    wchar_t *wstr = g_new(wchar_t, len);
     size_t ret;
 
     ret = mbstowcs(wstr, str, len);
@@ -728,6 +728,8 @@ static void usb_mtp_add_str(MTPData *data, const char *str)
     } else {
         usb_mtp_add_wstr(data, wstr);
     }
+
+    g_free(wstr);
 }
 
 static void usb_mtp_add_time(MTPData *data, time_t time)
@@ -996,7 +998,7 @@ static void usb_mtp_command(MTPState *s, MTPControl *c)
         trace_usb_mtp_op_open_session(s->dev.addr);
         s->session = c->argv[0];
         usb_mtp_object_alloc(s, s->next_handle++, NULL, s->root);
-#ifdef __linux__
+#ifdef CONFIG_INOTIFY1
         if (usb_mtp_inotify_init(s)) {
             fprintf(stderr, "usb-mtp: file monitoring init failed\n");
         }
@@ -1006,7 +1008,7 @@ static void usb_mtp_command(MTPState *s, MTPControl *c)
         trace_usb_mtp_op_close_session(s->dev.addr);
         s->session = 0;
         s->next_handle = 0;
-#ifdef __linux__
+#ifdef CONFIG_INOTIFY1
         usb_mtp_inotify_cleanup(s);
 #endif
         usb_mtp_object_free(s, QTAILQ_FIRST(&s->objects));
@@ -1134,7 +1136,7 @@ static void usb_mtp_handle_reset(USBDevice *dev)
 
     trace_usb_mtp_reset(s->dev.addr);
 
-#ifdef __linux__
+#ifdef CONFIG_INOTIFY1
     usb_mtp_inotify_cleanup(s);
 #endif
     usb_mtp_object_free(s, QTAILQ_FIRST(&s->objects));
@@ -1297,7 +1299,7 @@ static void usb_mtp_handle_data(USBDevice *dev, USBPacket *p)
         }
         break;
     case EP_EVENT:
-#ifdef __linux__
+#ifdef CONFIG_INOTIFY1
         if (!QTAILQ_EMPTY(&s->events)) {
             struct MTPMonEntry *e = QTAILQ_LAST(&s->events, events);
             uint32_t handle;

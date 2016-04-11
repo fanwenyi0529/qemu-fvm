@@ -11,6 +11,7 @@
  * the CCM.
  */
 
+#include "qemu/osdep.h"
 #include "hw/misc/imx25_ccm.h"
 
 #ifndef DEBUG_IMX25_CCM
@@ -119,20 +120,6 @@ static uint32_t imx25_ccm_get_mpll_clk(IMXCCMState *dev)
     return freq;
 }
 
-static uint32_t imx25_ccm_get_upll_clk(IMXCCMState *dev)
-{
-    uint32_t freq = 0;
-    IMX25CCMState *s = IMX25_CCM(dev);
-
-    if (!EXTRACT(s->reg[IMX25_CCM_CCTL_REG], UPLL_DIS)) {
-        freq = imx_ccm_calc_pll(s->reg[IMX25_CCM_UPCTL_REG], CKIH_FREQ);
-    }
-
-    DPRINTF("freq = %d\n", freq);
-
-    return freq;
-}
-
 static uint32_t imx25_ccm_get_mcu_clk(IMXCCMState *dev)
 {
     uint32_t freq;
@@ -181,21 +168,10 @@ static uint32_t imx25_ccm_get_clock_frequency(IMXCCMState *dev, IMXClk clock)
     DPRINTF("Clock = %d)\n", clock);
 
     switch (clock) {
-    case NOCLK:
-        break;
-    case CLK_MPLL:
-        freq = imx25_ccm_get_mpll_clk(dev);
-        break;
-    case CLK_UPLL:
-        freq = imx25_ccm_get_upll_clk(dev);
-        break;
-    case CLK_MCU:
-        freq = imx25_ccm_get_mcu_clk(dev);
-        break;
-    case CLK_AHB:
-        freq = imx25_ccm_get_ahb_clk(dev);
+    case CLK_NONE:
         break;
     case CLK_IPG:
+    case CLK_IPG_HIGH:
         freq = imx25_ccm_get_ipg_clk(dev);
         break;
     case CLK_32k:
@@ -249,7 +225,7 @@ static void imx25_ccm_reset(DeviceState *dev)
 
 static uint64_t imx25_ccm_read(void *opaque, hwaddr offset, unsigned size)
 {
-    uint32 value = 0;
+    uint32_t value = 0;
     IMX25CCMState *s = (IMX25CCMState *)opaque;
 
     if (offset < 0x70) {

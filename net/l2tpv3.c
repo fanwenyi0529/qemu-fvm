@@ -23,9 +23,9 @@
  * THE SOFTWARE.
  */
 
+#include "qemu/osdep.h"
 #include <linux/ip.h>
 #include <netdb.h>
-#include "config-host.h"
 #include "net/net.h"
 #include "clients.h"
 #include "qemu-common.h"
@@ -546,7 +546,7 @@ int net_init_l2tpv3(const NetClientOptions *opts,
     s->header_mismatch = false;
 
     assert(opts->type == NET_CLIENT_OPTIONS_KIND_L2TPV3);
-    l2tpv3 = opts->u.l2tpv3;
+    l2tpv3 = opts->u.l2tpv3.data;
 
     if (l2tpv3->has_ipv6 && l2tpv3->ipv6) {
         s->ipv6 = l2tpv3->ipv6;

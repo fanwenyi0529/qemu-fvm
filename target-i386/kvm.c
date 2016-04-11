@@ -12,7 +12,8 @@
  *
  */
 
-#include <assert.h>
+#include "qemu/osdep.h"
+#include "qapi/error.h"
 
 #include <linux/kvm.h>
 #include <linux/kvm_para.h>
@@ -137,6 +138,7 @@ static int kvm_get_tsc(CPUState *cs)
         return ret;
     }
 
+    assert(ret == 1);
     env->tsc = msr_data.entries[0].data;
     return 0;
 }
@@ -529,6 +531,36 @@ static bool hyperv_enabled(X86CPU *cpu)
             cpu->hyperv_stimer);
 }
 
+static int kvm_arch_set_tsc_khz(CPUState *cs)
+{
+    X86CPU *cpu = X86_CPU(cs);
+    CPUX86State *env = &cpu->env;
+    int r;
+
+    if (!env->tsc_khz) {
+        return 0;
+    }
+
+    r = kvm_check_extension(cs->kvm_state, KVM_CAP_TSC_CONTROL) ?
+        kvm_vcpu_ioctl(cs, KVM_SET_TSC_KHZ, env->tsc_khz) :
+        -ENOTSUP;
+    if (r < 0) {
+        /* When KVM_SET_TSC_KHZ fails, it's an error only if the current
+         * TSC frequency doesn't match the one we want.
+         */
+        int cur_freq = kvm_check_extension(cs->kvm_state, KVM_CAP_GET_TSC_KHZ) ?
+                       kvm_vcpu_ioctl(cs, KVM_GET_TSC_KHZ) :
+                       -ENOTSUP;
+        if (cur_freq <= 0 || cur_freq != env->tsc_khz) {
+            error_report("warning: TSC frequency mismatch between "
+                         "VM and host, and TSC scaling unavailable");
+            return r;
+        }
+    }
+
+    return 0;
+}
+
 static Error *invtsc_mig_blocker;
 
 #define KVM_MAX_CPUID_ENTRIES  100
@@ -606,6 +638,7 @@ int kvm_arch_init_vcpu(CPUState *cs)
         if (cpu->hyperv_crash && has_msr_hv_crash) {
             c->edx |= HV_X64_GUEST_CRASH_MSR_AVAILABLE;
         }
+        c->edx |= HV_X64_CPU_DYNAMIC_PARTITIONING_AVAILABLE;
         if (cpu->hyperv_reset && has_msr_hv_reset) {
             c->eax |= HV_X64_MSR_RESET_AVAILABLE;
         }
@@ -858,12 +891,22 @@ int kvm_arch_init_vcpu(CPUState *cs)
         return r;
     }
 
-    r = kvm_check_extension(cs->kvm_state, KVM_CAP_TSC_CONTROL);
-    if (r && env->tsc_khz) {
-        r = kvm_vcpu_ioctl(cs, KVM_SET_TSC_KHZ, env->tsc_khz);
-        if (r < 0) {
-            fprintf(stderr, "KVM_SET_TSC_KHZ failed\n");
-            return r;
+    r = kvm_arch_set_tsc_khz(cs);
+    if (r < 0) {
+        return r;
+    }
+
+    /* vcpu's TSC frequency is either specified by user, or following
+     * the value used by KVM if the former is not present. In the
+     * latter case, we query it from KVM and record in env->tsc_khz,
+     * so that vcpu's TSC frequency can be migrated later via this field.
+     */
+    if (!env->tsc_khz) {
+        r = kvm_check_extension(cs->kvm_state, KVM_CAP_GET_TSC_KHZ) ?
+            kvm_vcpu_ioctl(cs, KVM_GET_TSC_KHZ) :
+            -ENOTSUP;
+        if (r > 0) {
+            env->tsc_khz = r;
         }
     }
 
@@ -873,6 +916,9 @@ int kvm_arch_init_vcpu(CPUState *cs)
 
     if (env->features[FEAT_1_EDX] & CPUID_MTRR) {
         has_msr_mtrr = true;
+    }
+    if (!(env->features[FEAT_8000_0001_EDX] & CPUID_EXT2_RDTSCP)) {
+        has_msr_tsc_aux = false;
     }
 
     return 0;
@@ -1247,8 +1293,8 @@ static int kvm_put_fpu(X86CPU *cpu)
     }
     memcpy(fpu.fpr, env->fpregs, sizeof env->fpregs);
     for (i = 0; i < CPU_NB_REGS; i++) {
-        stq_p(&fpu.xmm[i][0], env->xmm_regs[i].XMM_Q(0));
-        stq_p(&fpu.xmm[i][8], env->xmm_regs[i].XMM_Q(1));
+        stq_p(&fpu.xmm[i][0], env->xmm_regs[i].ZMM_Q(0));
+        stq_p(&fpu.xmm[i][8], env->xmm_regs[i].ZMM_Q(1));
     }
     fpu.mxcsr = env->mxcsr;
 
@@ -1269,6 +1315,7 @@ static int kvm_put_fpu(X86CPU *cpu)
 #define XSAVE_OPMASK      272
 #define XSAVE_ZMM_Hi256   288
 #define XSAVE_Hi16_ZMM    416
+#define XSAVE_PKRU        672
 
 static int kvm_put_xsave(X86CPU *cpu)
 {
@@ -1309,19 +1356,20 @@ static int kvm_put_xsave(X86CPU *cpu)
     ymmh = (uint8_t *)&xsave->region[XSAVE_YMMH_SPACE];
     zmmh = (uint8_t *)&xsave->region[XSAVE_ZMM_Hi256];
     for (i = 0; i < CPU_NB_REGS; i++, xmm += 16, ymmh += 16, zmmh += 32) {
-        stq_p(xmm,     env->xmm_regs[i].XMM_Q(0));
-        stq_p(xmm+8,   env->xmm_regs[i].XMM_Q(1));
-        stq_p(ymmh,    env->xmm_regs[i].XMM_Q(2));
-        stq_p(ymmh+8,  env->xmm_regs[i].XMM_Q(3));
-        stq_p(zmmh,    env->xmm_regs[i].XMM_Q(4));
-        stq_p(zmmh+8,  env->xmm_regs[i].XMM_Q(5));
-        stq_p(zmmh+16, env->xmm_regs[i].XMM_Q(6));
-        stq_p(zmmh+24, env->xmm_regs[i].XMM_Q(7));
+        stq_p(xmm,     env->xmm_regs[i].ZMM_Q(0));
+        stq_p(xmm+8,   env->xmm_regs[i].ZMM_Q(1));
+        stq_p(ymmh,    env->xmm_regs[i].ZMM_Q(2));
+        stq_p(ymmh+8,  env->xmm_regs[i].ZMM_Q(3));
+        stq_p(zmmh,    env->xmm_regs[i].ZMM_Q(4));
+        stq_p(zmmh+8,  env->xmm_regs[i].ZMM_Q(5));
+        stq_p(zmmh+16, env->xmm_regs[i].ZMM_Q(6));
+        stq_p(zmmh+24, env->xmm_regs[i].ZMM_Q(7));
     }
 
 #ifdef TARGET_X86_64
     memcpy(&xsave->region[XSAVE_Hi16_ZMM], &env->xmm_regs[16],
             16 * sizeof env->xmm_regs[16]);
+    memcpy(&xsave->region[XSAVE_PKRU], &env->pkru, sizeof env->pkru);
 #endif
     r = kvm_vcpu_ioctl(CPU(cpu), KVM_SET_XSAVE, xsave);
     return r;
@@ -1409,6 +1457,7 @@ static int kvm_put_tscdeadline_msr(X86CPU *cpu)
         struct kvm_msr_entry entries[1];
     } msr_data;
     struct kvm_msr_entry *msrs = msr_data.entries;
+    int ret;
 
     if (!has_msr_tsc_deadline) {
         return 0;
@@ -1420,7 +1469,13 @@ static int kvm_put_tscdeadline_msr(X86CPU *cpu)
         .nmsrs = 1,
     };
 
-    return kvm_vcpu_ioctl(CPU(cpu), KVM_SET_MSRS, &msr_data);
+    ret = kvm_vcpu_ioctl(CPU(cpu), KVM_SET_MSRS, &msr_data);
+    if (ret < 0) {
+        return ret;
+    }
+
+    assert(ret == 1);
+    return 0;
 }
 
 /*
@@ -1435,6 +1490,11 @@ static int kvm_put_msr_feature_control(X86CPU *cpu)
         struct kvm_msrs info;
         struct kvm_msr_entry entry;
     } msr_data;
+    int ret;
+
+    if (!has_msr_feature_control) {
+        return 0;
+    }
 
     kvm_msr_entry_set(&msr_data.entry, MSR_IA32_FEATURE_CONTROL,
                       cpu->env.msr_ia32_feature_control);
@@ -1443,7 +1503,13 @@ static int kvm_put_msr_feature_control(X86CPU *cpu)
         .nmsrs = 1,
     };
 
-    return kvm_vcpu_ioctl(CPU(cpu), KVM_SET_MSRS, &msr_data);
+    ret = kvm_vcpu_ioctl(CPU(cpu), KVM_SET_MSRS, &msr_data);
+    if (ret < 0) {
+        return ret;
+    }
+
+    assert(ret == 1);
+    return 0;
 }
 
 static int kvm_put_msrs(X86CPU *cpu, int level)
@@ -1455,6 +1521,7 @@ static int kvm_put_msrs(X86CPU *cpu, int level)
     } msr_data;
     struct kvm_msr_entry *msrs = msr_data.entries;
     int n = 0, i;
+    int ret;
 
     kvm_msr_entry_set(&msrs[n++], MSR_IA32_SYSENTER_CS, env->sysenter_cs);
     kvm_msr_entry_set(&msrs[n++], MSR_IA32_SYSENTER_ESP, env->sysenter_esp);
@@ -1648,8 +1715,13 @@ static int kvm_put_msrs(X86CPU *cpu, int level)
         .nmsrs = n,
     };
 
-    return kvm_vcpu_ioctl(CPU(cpu), KVM_SET_MSRS, &msr_data);
+    ret = kvm_vcpu_ioctl(CPU(cpu), KVM_SET_MSRS, &msr_data);
+    if (ret < 0) {
+        return ret;
+    }
 
+    assert(ret == n);
+    return 0;
 }
 
 
@@ -1675,8 +1747,8 @@ static int kvm_get_fpu(X86CPU *cpu)
     }
     memcpy(env->fpregs, fpu.fpr, sizeof env->fpregs);
     for (i = 0; i < CPU_NB_REGS; i++) {
-        env->xmm_regs[i].XMM_Q(0) = ldq_p(&fpu.xmm[i][0]);
-        env->xmm_regs[i].XMM_Q(1) = ldq_p(&fpu.xmm[i][8]);
+        env->xmm_regs[i].ZMM_Q(0) = ldq_p(&fpu.xmm[i][0]);
+        env->xmm_regs[i].ZMM_Q(1) = ldq_p(&fpu.xmm[i][8]);
     }
     env->mxcsr = fpu.mxcsr;
 
@@ -1727,19 +1799,20 @@ static int kvm_get_xsave(X86CPU *cpu)
     ymmh = (const uint8_t *)&xsave->region[XSAVE_YMMH_SPACE];
     zmmh = (const uint8_t *)&xsave->region[XSAVE_ZMM_Hi256];
     for (i = 0; i < CPU_NB_REGS; i++, xmm += 16, ymmh += 16, zmmh += 32) {
-        env->xmm_regs[i].XMM_Q(0) = ldq_p(xmm);
-        env->xmm_regs[i].XMM_Q(1) = ldq_p(xmm+8);
-        env->xmm_regs[i].XMM_Q(2) = ldq_p(ymmh);
-        env->xmm_regs[i].XMM_Q(3) = ldq_p(ymmh+8);
-        env->xmm_regs[i].XMM_Q(4) = ldq_p(zmmh);
-        env->xmm_regs[i].XMM_Q(5) = ldq_p(zmmh+8);
-        env->xmm_regs[i].XMM_Q(6) = ldq_p(zmmh+16);
-        env->xmm_regs[i].XMM_Q(7) = ldq_p(zmmh+24);
+        env->xmm_regs[i].ZMM_Q(0) = ldq_p(xmm);
+        env->xmm_regs[i].ZMM_Q(1) = ldq_p(xmm+8);
+        env->xmm_regs[i].ZMM_Q(2) = ldq_p(ymmh);
+        env->xmm_regs[i].ZMM_Q(3) = ldq_p(ymmh+8);
+        env->xmm_regs[i].ZMM_Q(4) = ldq_p(zmmh);
+        env->xmm_regs[i].ZMM_Q(5) = ldq_p(zmmh+8);
+        env->xmm_regs[i].ZMM_Q(6) = ldq_p(zmmh+16);
+        env->xmm_regs[i].ZMM_Q(7) = ldq_p(zmmh+24);
     }
 
 #ifdef TARGET_X86_64
     memcpy(&env->xmm_regs[16], &xsave->region[XSAVE_Hi16_ZMM],
            16 * sizeof env->xmm_regs[16]);
+    memcpy(&env->pkru, &xsave->region[XSAVE_PKRU], sizeof env->pkru);
 #endif
     return 0;
 }
@@ -1822,13 +1895,16 @@ static int kvm_get_sregs(X86CPU *cpu)
        HF_OSFXSR_MASK | HF_LMA_MASK | HF_CS32_MASK | \
        HF_SS32_MASK | HF_CS64_MASK | HF_ADDSEG_MASK)
 
-    hflags = (env->segs[R_SS].flags >> DESC_DPL_SHIFT) & HF_CPL_MASK;
+    hflags = env->hflags & HFLAG_COPY_MASK;
+    hflags |= (env->segs[R_SS].flags >> DESC_DPL_SHIFT) & HF_CPL_MASK;
     hflags |= (env->cr[0] & CR0_PE_MASK) << (HF_PE_SHIFT - CR0_PE_SHIFT);
     hflags |= (env->cr[0] << (HF_MP_SHIFT - CR0_MP_SHIFT)) &
                 (HF_MP_MASK | HF_EM_MASK | HF_TS_MASK);
     hflags |= (env->eflags & (HF_TF_MASK | HF_VM_MASK | HF_IOPL_MASK));
-    hflags |= (env->cr[4] & CR4_OSFXSR_MASK) <<
-                (HF_OSFXSR_SHIFT - CR4_OSFXSR_SHIFT);
+
+    if (env->cr[4] & CR4_OSFXSR_MASK) {
+        hflags |= HF_OSFXSR_MASK;
+    }
 
     if (env->efer & MSR_EFER_LMA) {
         hflags |= HF_LMA_MASK;
@@ -1849,7 +1925,7 @@ static int kvm_get_sregs(X86CPU *cpu)
                         env->segs[R_SS].base) != 0) << HF_ADDSEG_SHIFT;
         }
     }
-    env->hflags = (env->hflags & HFLAG_COPY_MASK) | hflags;
+    env->hflags = hflags;
 
     return 0;
 }
@@ -2014,6 +2090,7 @@ static int kvm_get_msrs(X86CPU *cpu)
         return ret;
     }
 
+    assert(ret == n);
     for (i = 0; i < ret; i++) {
         uint32_t index = msrs[i].index;
         switch (index) {
@@ -2470,11 +2547,20 @@ int kvm_arch_put_registers(CPUState *cpu, int level)
 
     assert(cpu_is_stopped(cpu) || qemu_cpu_is_self(cpu));
 
-    if (level >= KVM_PUT_RESET_STATE && has_msr_feature_control) {
+    if (level >= KVM_PUT_RESET_STATE) {
         ret = kvm_put_msr_feature_control(x86_cpu);
         if (ret < 0) {
             return ret;
         }
+    }
+
+    if (level == KVM_PUT_FULL_STATE) {
+        /* We don't check for kvm_arch_set_tsc_khz() errors here,
+         * because TSC frequency mismatch shouldn't abort migration,
+         * unless the user explicitly asked for a more strict TSC
+         * setting (e.g. using an explicit "tsc-freq" option).
+         */
+        kvm_arch_set_tsc_khz(cpu);
     }
 
     ret = kvm_getput_regs(x86_cpu, 1);
@@ -2543,41 +2629,44 @@ int kvm_arch_get_registers(CPUState *cs)
 
     ret = kvm_getput_regs(cpu, 0);
     if (ret < 0) {
-        return ret;
+        goto out;
     }
     ret = kvm_get_xsave(cpu);
     if (ret < 0) {
-        return ret;
+        goto out;
     }
     ret = kvm_get_xcrs(cpu);
     if (ret < 0) {
-        return ret;
+        goto out;
     }
     ret = kvm_get_sregs(cpu);
     if (ret < 0) {
-        return ret;
+        goto out;
     }
     ret = kvm_get_msrs(cpu);
     if (ret < 0) {
-        return ret;
+        goto out;
     }
     ret = kvm_get_mp_state(cpu);
     if (ret < 0) {
-        return ret;
+        goto out;
     }
     ret = kvm_get_apic(cpu);
     if (ret < 0) {
-        return ret;
+        goto out;
     }
     ret = kvm_get_vcpu_events(cpu);
     if (ret < 0) {
-        return ret;
+        goto out;
     }
     ret = kvm_get_debugregs(cpu);
     if (ret < 0) {
-        return ret;
+        goto out;
     }
-    return 0;
+    ret = 0;
+ out:
+    cpu_sync_bndcs_hflags(&cpu->env);
+    return ret;
 }
 
 void kvm_arch_pre_run(CPUState *cpu, struct kvm_run *run)

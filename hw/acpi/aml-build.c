@@ -19,12 +19,8 @@
  * with this program; if not, see <http://www.gnu.org/licenses/>.
  */
 
+#include "qemu/osdep.h"
 #include <glib/gprintf.h>
-#include <stdio.h>
-#include <stdarg.h>
-#include <assert.h>
-#include <stdbool.h>
-#include <string.h>
 #include "hw/acpi/aml-build.h"
 #include "qemu/bswap.h"
 #include "qemu/bitops.h"
@@ -260,6 +256,34 @@ static void build_append_int(GArray *table, uint64_t value)
         build_append_byte(table, 0x0E); /* QWordPrefix */
         build_append_int_noprefix(table, value, 8);
     }
+}
+
+/*
+ * Build NAME(XXXX, 0x00000000) where 0x00000000 is encoded as a dword,
+ * and return the offset to 0x00000000 for runtime patching.
+ *
+ * Warning: runtime patching is best avoided. Only use this as
+ * a replacement for DataTableRegion (for guests that don't
+ * support it).
+ */
+int
+build_append_named_dword(GArray *array, const char *name_format, ...)
+{
+    int offset;
+    va_list ap;
+
+    build_append_byte(array, 0x08); /* NameOp */
+    va_start(ap, name_format);
+    build_append_namestringv(array, name_format, ap);
+    va_end(ap);
+
+    build_append_byte(array, 0x0C); /* DWordPrefix */
+
+    offset = array->len;
+    build_append_int_noprefix(array, 0x00000000, 4);
+    assert(array->len == offset + 4);
+
+    return offset;
 }
 
 static GPtrArray *alloc_list;
@@ -946,14 +970,14 @@ Aml *aml_package(uint8_t num_elements)
 
 /* ACPI 1.0b: 16.2.5.2 Named Objects Encoding: DefOpRegion */
 Aml *aml_operation_region(const char *name, AmlRegionSpace rs,
-                          uint32_t offset, uint32_t len)
+                          Aml *offset, uint32_t len)
 {
     Aml *var = aml_alloc();
     build_append_byte(var->buf, 0x5B); /* ExtOpPrefix */
     build_append_byte(var->buf, 0x80); /* OpRegionOp */
     build_append_namestring(var->buf, "%s", name);
     build_append_byte(var->buf, rs);
-    build_append_int(var->buf, offset);
+    aml_append(var, offset);
     build_append_int(var->buf, len);
     return var;
 }
@@ -997,6 +1021,20 @@ Aml *create_field_common(int opcode, Aml *srcbuf, Aml *index, const char *name)
     Aml *var = aml_opcode(opcode);
     aml_append(var, srcbuf);
     aml_append(var, index);
+    build_append_namestring(var->buf, "%s", name);
+    return var;
+}
+
+/* ACPI 1.0b: 16.2.5.2 Named Objects Encoding: DefCreateField */
+Aml *aml_create_field(Aml *srcbuf, Aml *bit_index, Aml *num_bits,
+                      const char *name)
+{
+    Aml *var = aml_alloc();
+    build_append_byte(var->buf, 0x5B); /* ExtOpPrefix */
+    build_append_byte(var->buf, 0x13); /* CreateFieldOp */
+    aml_append(var, srcbuf);
+    aml_append(var, bit_index);
+    aml_append(var, num_bits);
     build_append_namestring(var->buf, "%s", name);
     return var;
 }
@@ -1427,15 +1465,27 @@ Aml *aml_alias(const char *source_object, const char *alias_object)
     return var;
 }
 
+/* ACPI 1.0b: 16.2.5.4 Type 2 Opcodes Encoding: DefConcat */
+Aml *aml_concatenate(Aml *source1, Aml *source2, Aml *target)
+{
+    return build_opcode_2arg_dst(0x73 /* ConcatOp */, source1, source2,
+                                 target);
+}
+
 void
 build_header(GArray *linker, GArray *table_data,
              AcpiTableHeader *h, const char *sig, int len, uint8_t rev,
-             const char *oem_table_id)
+             const char *oem_id, const char *oem_table_id)
 {
     memcpy(&h->signature, sig, 4);
     h->length = cpu_to_le32(len);
     h->revision = rev;
-    memcpy(h->oem_id, ACPI_BUILD_APPNAME6, 6);
+
+    if (oem_id) {
+        strncpy((char *)h->oem_id, oem_id, sizeof h->oem_id);
+    } else {
+        memcpy(h->oem_id, ACPI_BUILD_APPNAME6, 6);
+    }
 
     if (oem_table_id) {
         strncpy((char *)h->oem_table_id, oem_table_id, sizeof(h->oem_table_id));
@@ -1450,7 +1500,7 @@ build_header(GArray *linker, GArray *table_data,
     h->checksum = 0;
     /* Checksum to be filled in by Guest linker */
     bios_linker_loader_add_checksum(linker, ACPI_BUILD_TABLE_FILE,
-                                    table_data->data, h, len, &h->checksum);
+                                    table_data, h, len, &h->checksum);
 }
 
 void *acpi_data_push(GArray *table_data, unsigned size)
@@ -1491,7 +1541,8 @@ void acpi_build_tables_cleanup(AcpiBuildTables *tables, bool mfre)
 
 /* Build rsdt table */
 void
-build_rsdt(GArray *table_data, GArray *linker, GArray *table_offsets)
+build_rsdt(GArray *table_data, GArray *linker, GArray *table_offsets,
+           const char *oem_id, const char *oem_table_id)
 {
     AcpiRsdtDescriptorRev1 *rsdt;
     size_t rsdt_len;
@@ -1510,5 +1561,5 @@ build_rsdt(GArray *table_data, GArray *linker, GArray *table_offsets)
                                        sizeof(uint32_t));
     }
     build_header(linker, table_data,
-                 (void *)rsdt, "RSDT", rsdt_len, 1, NULL);
+                 (void *)rsdt, "RSDT", rsdt_len, 1, oem_id, oem_table_id);
 }

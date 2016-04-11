@@ -8,8 +8,7 @@
  *
  */
 
-#include <stdio.h>
-#include <sys/types.h>
+#include "qemu/osdep.h"
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 
@@ -429,7 +428,7 @@ int kvm_arch_get_registers(CPUState *cs)
     if (ret) {
         return ret;
     }
-    cpsr_write(env, cpsr, 0xffffffff);
+    cpsr_write(env, cpsr, 0xffffffff, CPSRWriteRaw);
 
     /* Make sure the current mode regs are properly set */
     mode = env->uncached_cpsr & CPSR_M;

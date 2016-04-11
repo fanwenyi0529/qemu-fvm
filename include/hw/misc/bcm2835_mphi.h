@@ -8,7 +8,7 @@
 
 #include "hw/sysbus.h"
 
-#define TYPE_BCM2835_MPHI "bcm2835_mphi"
+#define TYPE_BCM2835_MPHI "bcm2835-mphi"
 #define BCM2835_MPHI(obj) \
         OBJECT_CHECK(BCM2835MphiState, (obj), TYPE_BCM2835_MPHI)
 

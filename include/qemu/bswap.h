@@ -1,15 +1,10 @@
 #ifndef BSWAP_H
 #define BSWAP_H
 
-#include "config-host.h"
-#include <inttypes.h>
-#include <limits.h>
-#include <string.h>
 #include "fpu/softfloat.h"
 
 #ifdef CONFIG_MACHINE_BSWAP_H
 # include <sys/endian.h>
-# include <sys/types.h>
 # include <machine/bswap.h>
 #elif defined(__FreeBSD__)
 # include <sys/endian.h>
@@ -424,11 +419,9 @@ static inline void stfq_be_p(void *ptr, float64 v)
 
 static inline unsigned long leul_to_cpu(unsigned long v)
 {
-    /* In order to break an include loop between here and
-       qemu-common.h, don't rely on HOST_LONG_BITS.  */
-#if ULONG_MAX == UINT32_MAX
+#if HOST_LONG_BITS == 32
     return le_bswap(v, 32);
-#elif ULONG_MAX == UINT64_MAX
+#elif HOST_LONG_BITS == 64
     return le_bswap(v, 64);
 #else
 # error Unknown sizeof long

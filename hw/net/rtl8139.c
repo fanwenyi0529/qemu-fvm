@@ -49,6 +49,7 @@
  */
 
 /* For crc32 */
+#include "qemu/osdep.h"
 #include <zlib.h>
 
 #include "hw/hw.h"
@@ -2045,7 +2046,7 @@ static int rtl8139_cplus_transmit_one(RTL8139State *s)
     }
 
     /* transfer ownership to target */
-    txdw0 &= ~CP_RX_OWN;
+    txdw0 &= ~CP_TX_OWN;
 
     /* reset error indicator bits */
     txdw0 &= ~CP_TX_STATUS_UNF;

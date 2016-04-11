@@ -8,7 +8,7 @@
 
 #include "hw/sysbus.h"
 
-#define TYPE_BCM2835_POWER "bcm2835_power"
+#define TYPE_BCM2835_POWER "bcm2835-power"
 #define BCM2835_POWER(obj) \
         OBJECT_CHECK(BCM2835PowerState, (obj), TYPE_BCM2835_POWER)
 

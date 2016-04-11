@@ -18,8 +18,10 @@
  *
  */
 
+#include "qemu/osdep.h"
 #include "io/channel-command.h"
 #include "io/channel-watch.h"
+#include "qapi/error.h"
 #include "qemu/sockets.h"
 #include "trace.h"
 
@@ -66,7 +68,7 @@ qio_channel_command_new_spawn(const char *const argv[],
 
     if (stdinnull || stdoutnull) {
         devnull = open("/dev/null", O_RDWR);
-        if (!devnull) {
+        if (devnull < 0) {
             error_setg_errno(errp, errno,
                              "Unable to open /dev/null");
             goto error;
@@ -98,6 +100,9 @@ qio_channel_command_new_spawn(const char *const argv[],
             close(stdoutfd[0]);
             close(stdoutfd[1]);
         }
+        if (devnull != -1) {
+            close(devnull);
+        }
 
         execv(argv[0], (char * const *)argv);
         _exit(1);
@@ -117,6 +122,9 @@ qio_channel_command_new_spawn(const char *const argv[],
     return ioc;
 
  error:
+    if (devnull != -1) {
+        close(devnull);
+    }
     if (stdinfd[0] != -1) {
         close(stdinfd[0]);
     }
@@ -179,6 +187,7 @@ static int qio_channel_command_abort(QIOChannelCommand *ioc,
                        (unsigned long long)ioc->pid);
             return -1;
         }
+        step++;
         usleep(10 * 1000);
         goto rewait;
     }
@@ -201,12 +210,12 @@ static void qio_channel_command_finalize(Object *obj)
     QIOChannelCommand *ioc = QIO_CHANNEL_COMMAND(obj);
     if (ioc->readfd != -1) {
         close(ioc->readfd);
-        ioc->readfd = -1;
     }
-    if (ioc->writefd != -1) {
+    if (ioc->writefd != -1 &&
+        ioc->writefd != ioc->readfd) {
         close(ioc->writefd);
-        ioc->writefd = -1;
     }
+    ioc->writefd = ioc->readfd = -1;
     if (ioc->pid > 0) {
 #ifndef WIN32
         qio_channel_command_abort(ioc, NULL);
@@ -228,8 +237,7 @@ static ssize_t qio_channel_command_readv(QIOChannel *ioc,
  retry:
     ret = readv(cioc->readfd, iov, niov);
     if (ret < 0) {
-        if (errno == EAGAIN ||
-            errno == EWOULDBLOCK) {
+        if (errno == EAGAIN) {
             return QIO_CHANNEL_ERR_BLOCK;
         }
         if (errno == EINTR) {
@@ -257,8 +265,7 @@ static ssize_t qio_channel_command_writev(QIOChannel *ioc,
  retry:
     ret = writev(cioc->writefd, iov, niov);
     if (ret <= 0) {
-        if (errno == EAGAIN ||
-            errno == EWOULDBLOCK) {
+        if (errno == EAGAIN) {
             return QIO_CHANNEL_ERR_BLOCK;
         }
         if (errno == EINTR) {
@@ -298,12 +305,16 @@ static int qio_channel_command_close(QIOChannel *ioc,
     /* We close FDs before killing, because that
      * gives a better chance of clean shutdown
      */
-    if (close(cioc->writefd) < 0) {
+    if (cioc->readfd != -1 &&
+        close(cioc->readfd) < 0) {
         rv = -1;
     }
-    if (close(cioc->readfd) < 0) {
+    if (cioc->writefd != -1 &&
+        cioc->writefd != cioc->readfd &&
+        close(cioc->writefd) < 0) {
         rv = -1;
     }
+    cioc->writefd = cioc->readfd = -1;
 #ifndef WIN32
     if (qio_channel_command_abort(cioc, errp) < 0) {
         return -1;

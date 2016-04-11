@@ -13,11 +13,12 @@
  * GNU GPL, version 2 or (at your option) any later version.
  */
 
+#include "qemu/osdep.h"
 #include "qemu-common.h"
 #include "block/block.h"
 #include "qemu/queue.h"
 #include "qemu/sockets.h"
-#ifdef CONFIG_EPOLL
+#ifdef CONFIG_EPOLL_CREATE1
 #include <sys/epoll.h>
 #endif
 
@@ -32,7 +33,7 @@ struct AioHandler
     QLIST_ENTRY(AioHandler) node;
 };
 
-#ifdef CONFIG_EPOLL
+#ifdef CONFIG_EPOLL_CREATE1
 
 /* The fd number threashold to switch to epoll */
 #define EPOLL_ENABLE_THRESHOLD 64
@@ -482,7 +483,7 @@ bool aio_poll(AioContext *ctx, bool blocking)
 
 void aio_context_setup(AioContext *ctx, Error **errp)
 {
-#ifdef CONFIG_EPOLL
+#ifdef CONFIG_EPOLL_CREATE1
     assert(!ctx->epollfd);
     ctx->epollfd = epoll_create1(EPOLL_CLOEXEC);
     if (ctx->epollfd == -1) {

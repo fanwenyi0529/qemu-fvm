@@ -10,6 +10,7 @@
  * See the COPYING.LIB file in the top-level directory.
  */
 
+#include "qemu/osdep.h"
 #include "qapi/qmp/qint.h"
 #include "qapi/qmp/qfloat.h"
 #include "qapi/qmp/qdict.h"
@@ -18,6 +19,7 @@
 #include "qapi/qmp/qobject.h"
 #include "qemu/queue.h"
 #include "qemu-common.h"
+#include "qemu/cutils.h"
 
 /**
  * qdict_new(): Create a new QDict

@@ -3,6 +3,7 @@
  * This code is licensed under the GNU GPLv2 and later.
  */
 
+#include "qemu/osdep.h"
 #include "hw/timer/bcm2835_timer.h"
 #include "qemu/main-loop.h"
 

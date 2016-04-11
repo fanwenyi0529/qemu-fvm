@@ -25,11 +25,13 @@
  * THE SOFTWARE.
  *
  */
+#include "qemu/osdep.h"
 #include "cpu.h"
 #include "qemu/timer.h"
 #include "sysemu/sysemu.h"
 #include "hw/ppc/spapr.h"
 #include "qapi-event.h"
+#include "qemu/cutils.h"
 
 #define SPAPR_RTC(obj) \
     OBJECT_CHECK(sPAPRRTCState, (obj), TYPE_SPAPR_RTC)

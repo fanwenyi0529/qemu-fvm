@@ -19,6 +19,8 @@
  * License along with this library; if not, see <http://www.gnu.org/licenses/>.
  */
 
+#include "qemu/osdep.h"
+#include "qapi/error.h"
 #include "hw/hw.h"
 #include "sysemu/sysemu.h"
 #include "hw/boards.h"
@@ -430,6 +432,7 @@ static void spapr_vio_busdev_realize(DeviceState *qdev, Error **errp)
     VIOsPAPRDevice *dev = (VIOsPAPRDevice *)qdev;
     VIOsPAPRDeviceClass *pc = VIO_SPAPR_DEVICE_GET_CLASS(dev);
     char *id;
+    Error *local_err = NULL;
 
     if (dev->reg != -1) {
         /*
@@ -462,9 +465,9 @@ static void spapr_vio_busdev_realize(DeviceState *qdev, Error **errp)
         dev->qdev.id = id;
     }
 
-    dev->irq = xics_alloc(spapr->icp, 0, dev->irq, false);
-    if (!dev->irq) {
-        error_setg(errp, "can't allocate IRQ");
+    dev->irq = xics_alloc(spapr->icp, 0, dev->irq, false, &local_err);
+    if (local_err) {
+        error_propagate(errp, local_err);
         return;
     }
 

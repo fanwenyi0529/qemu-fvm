@@ -26,7 +26,12 @@
 #ifndef QEMU_OS_POSIX_H
 #define QEMU_OS_POSIX_H
 
-#include <sys/time.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <netinet/tcp.h>
+#include <arpa/inet.h>
+#include <netdb.h>
+#include <sys/un.h>
 
 typedef unsigned long lpul;
 typedef long lpl;
@@ -39,6 +44,9 @@ void os_setup_signal_handling(void);
 void os_daemonize(void);
 void os_setup_post(void);
 int os_mlock(void);
+
+#define closesocket(s) close(s)
+#define ioctlsocket(s, r, v) ioctl(s, r, v)
 
 typedef struct timeval qemu_timeval;
 #define qemu_gettimeofday(tp) gettimeofday(tp, NULL)

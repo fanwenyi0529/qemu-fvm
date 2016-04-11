@@ -16,23 +16,19 @@
  *  You should have received a copy of the GNU General Public License
  *  along with this program; if not, see <http://www.gnu.org/licenses/>.
  */
-#include <stdlib.h>
-#include <stdio.h>
-#include <stdarg.h>
-#include <string.h>
-#include <errno.h>
-#include <unistd.h>
+#include "qemu/osdep.h"
 #include <machine/trap.h>
-#include <sys/types.h>
 #include <sys/mman.h>
 
 #include "qemu.h"
-#include "qemu-common.h"
+#include "qemu/path.h"
+#include "qemu/help_option.h"
 /* For tb_lock */
 #include "cpu.h"
 #include "tcg.h"
 #include "qemu/timer.h"
 #include "qemu/envlist.h"
+#include "exec/log.h"
 
 int singlestep;
 unsigned long mmap_min_addr;

@@ -18,8 +18,8 @@
  *
  */
 
-#include <config-host.h>
-
+#include "qemu/osdep.h"
+#include "qapi/error.h"
 #include "qemu/base64.h"
 
 static const char *base64_valid_chars =

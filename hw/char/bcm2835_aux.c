@@ -2,42 +2,79 @@
  * BCM2835 (Raspberry Pi / Pi 2) Aux block (mini UART and SPI).
  * Copyright (c) 2015, Microsoft
  * Written by Andrew Baumann
+ * Based on pl011.c, copyright terms below:
  *
- * Fairly hacky. Based on gutted code for pl011 emulation (copyright below).
- */
-
-/*
  * Arm PrimeCell PL011 UART
  *
  * Copyright (c) 2006 CodeSourcery.
  * Written by Paul Brook
  *
  * This code is licensed under the GPL.
+ *
+ * At present only the core UART functions (data path for tx/rx) are
+ * implemented. The following features/registers are unimplemented:
+ *  - Line/modem control
+ *  - Scratch register
+ *  - Extra control
+ *  - Baudrate
+ *  - SPI interfaces
  */
 
+#include "qemu/osdep.h"
 #include "hw/char/bcm2835_aux.h"
+
+#define AUX_IRQ         0x0
+#define AUX_ENABLES     0x4
+#define AUX_MU_IO_REG   0x40
+#define AUX_MU_IER_REG  0x44
+#define AUX_MU_IIR_REG  0x48
+#define AUX_MU_LCR_REG  0x4c
+#define AUX_MU_MCR_REG  0x50
+#define AUX_MU_LSR_REG  0x54
+#define AUX_MU_MSR_REG  0x58
+#define AUX_MU_SCRATCH  0x5c
+#define AUX_MU_CNTL_REG 0x60
+#define AUX_MU_STAT_REG 0x64
+#define AUX_MU_BAUD_REG 0x68
+
+/* bits in IER/IIR registers */
+#define TX_INT  0x1
+#define RX_INT  0x2
 
 static void bcm2835_aux_update(BCM2835AuxState *s)
 {
-    bool status = (s->rx_int_enable && s->read_count != 0) || s->tx_int_enable;
-    qemu_set_irq(s->irq, status);
+    /* signal an interrupt if either:
+     * 1. rx interrupt is enabled and we have a non-empty rx fifo, or
+     * 2. the tx interrupt is enabled (since we instantly drain the tx fifo)
+     */
+    s->iir = 0;
+    if ((s->ier & RX_INT) && s->read_count != 0) {
+        s->iir |= RX_INT;
+    }
+    if (s->ier & TX_INT) {
+        s->iir |= TX_INT;
+    }
+    qemu_set_irq(s->irq, s->iir != 0);
 }
 
-static uint64_t bcm2835_aux_read(void *opaque, hwaddr offset,
-                           unsigned size)
+static uint64_t bcm2835_aux_read(void *opaque, hwaddr offset, unsigned size)
 {
-    BCM2835AuxState *s = (BCM2835AuxState *)opaque;
+    BCM2835AuxState *s = opaque;
     uint32_t c, res;
 
-    switch (offset >> 2) {
-    case 1: /* AUXENB */
-        return 1; /* mini UART enabled */
+    switch (offset) {
+    case AUX_IRQ:
+        return s->iir != 0;
 
-    case 16: /* AUX_MU_IO_REG */
+    case AUX_ENABLES:
+        return 1; /* mini UART permanently enabled */
+
+    case AUX_MU_IO_REG:
+        /* "DLAB bit set means access baudrate register" is NYI */
         c = s->read_fifo[s->read_pos];
         if (s->read_count > 0) {
             s->read_count--;
-            if (++s->read_pos == 8) {
+            if (++s->read_pos == BCM2835_AUX_RX_FIFO_LEN) {
                 s->read_pos = 0;
             }
         }
@@ -47,84 +84,129 @@ static uint64_t bcm2835_aux_read(void *opaque, hwaddr offset,
         bcm2835_aux_update(s);
         return c;
 
-    case 17: /* AUX_MU_IIR_REG */
-        res = 0;
-        if (s->rx_int_enable) {
+    case AUX_MU_IER_REG:
+        /* "DLAB bit set means access baudrate register" is NYI */
+        return 0xc0 | s->ier; /* FIFO enables always read 1 */
+
+    case AUX_MU_IIR_REG:
+        res = 0xc0; /* FIFO enables */
+        /* The spec is unclear on what happens when both tx and rx
+         * interrupts are active, besides that this cannot occur. At
+         * present, we choose to prioritise the rx interrupt, since
+         * the tx fifo is always empty. */
+        if (s->read_count != 0) {
+            res |= 0x4;
+        } else {
             res |= 0x2;
         }
-        if (s->tx_int_enable) {
+        if (s->iir == 0) {
             res |= 0x1;
         }
         return res;
 
-    case 18: /* AUX_MU_IER_REG */
-        res = 0xc0;
-        if (s->tx_int_enable) {
-            res |= 0x1;
-        } else if (s->rx_int_enable && s->read_count != 0) {
-            res |= 0x2;
-        }
-        return res;
+    case AUX_MU_LCR_REG:
+        qemu_log_mask(LOG_UNIMP, "%s: AUX_MU_LCR_REG unsupported\n", __func__);
+        return 0;
 
-    case 21: /* AUX_MU_LSR_REG */
+    case AUX_MU_MCR_REG:
+        qemu_log_mask(LOG_UNIMP, "%s: AUX_MU_MCR_REG unsupported\n", __func__);
+        return 0;
+
+    case AUX_MU_LSR_REG:
         res = 0x60; /* tx idle, empty */
         if (s->read_count != 0) {
             res |= 0x1;
         }
         return res;
 
-    case 25: /* AUX_MU_STAT_REG */
-        res = 0x302; /* space in the output buffer, empty tx fifo */
+    case AUX_MU_MSR_REG:
+        qemu_log_mask(LOG_UNIMP, "%s: AUX_MU_MSR_REG unsupported\n", __func__);
+        return 0;
+
+    case AUX_MU_SCRATCH:
+        qemu_log_mask(LOG_UNIMP, "%s: AUX_MU_SCRATCH unsupported\n", __func__);
+        return 0;
+
+    case AUX_MU_CNTL_REG:
+        return 0x3; /* tx, rx enabled */
+
+    case AUX_MU_STAT_REG:
+        res = 0x30e; /* space in the output buffer, empty tx fifo, idle tx/rx */
         if (s->read_count > 0) {
             res |= 0x1; /* data in input buffer */
-            assert(s->read_count < 8);
+            assert(s->read_count < BCM2835_AUX_RX_FIFO_LEN);
             res |= ((uint32_t)s->read_count) << 16; /* rx fifo fill level */
         }
         return res;
 
+    case AUX_MU_BAUD_REG:
+        qemu_log_mask(LOG_UNIMP, "%s: AUX_MU_BAUD_REG unsupported\n", __func__);
+        return 0;
+
     default:
-        qemu_log_mask(LOG_GUEST_ERROR,
-                      "bcm2835_aux_read: Bad offset %x\n", (int)offset);
+        qemu_log_mask(LOG_GUEST_ERROR, "%s: Bad offset %"HWADDR_PRIx"\n",
+                      __func__, offset);
         return 0;
     }
 }
 
-static void bcm2835_aux_write(void *opaque, hwaddr offset,
-                              uint64_t value, unsigned size)
+static void bcm2835_aux_write(void *opaque, hwaddr offset, uint64_t value,
+                              unsigned size)
 {
-    BCM2835AuxState *s = (BCM2835AuxState *)opaque;
+    BCM2835AuxState *s = opaque;
     unsigned char ch;
 
-    switch (offset >> 2) {
-    case 1: /* AUXENB */
+    switch (offset) {
+    case AUX_ENABLES:
         if (value != 1) {
-            qemu_log_mask(LOG_GUEST_ERROR,
-                          "bcm2835_aux_write: Trying to enable SPI or"
-                          " disable UART. Not supported!\n");
+            qemu_log_mask(LOG_UNIMP, "%s: unsupported attempt to enable SPI "
+                          "or disable UART\n", __func__);
         }
         break;
 
-    case 16: /* AUX_MU_IO_REG */
+    case AUX_MU_IO_REG:
+        /* "DLAB bit set means access baudrate register" is NYI */
         ch = value;
         if (s->chr) {
             qemu_chr_fe_write(s->chr, &ch, 1);
         }
         break;
 
-    case 17: /* AUX_MU_IIR_REG */
-        s->rx_int_enable = (value & 0x2) != 0;
-        s->tx_int_enable = (value & 0x1) != 0;
+    case AUX_MU_IER_REG:
+        /* "DLAB bit set means access baudrate register" is NYI */
+        s->ier = value & (TX_INT | RX_INT);
+        bcm2835_aux_update(s);
         break;
 
-    case 18: /* AUX_MU_IER_REG */
-        if (value & 0x1) {
+    case AUX_MU_IIR_REG:
+        if (value & 0x2) {
             s->read_count = 0;
         }
         break;
 
+    case AUX_MU_LCR_REG:
+        qemu_log_mask(LOG_UNIMP, "%s: AUX_MU_LCR_REG unsupported\n", __func__);
+        break;
+
+    case AUX_MU_MCR_REG:
+        qemu_log_mask(LOG_UNIMP, "%s: AUX_MU_MCR_REG unsupported\n", __func__);
+        break;
+
+    case AUX_MU_SCRATCH:
+        qemu_log_mask(LOG_UNIMP, "%s: AUX_MU_SCRATCH unsupported\n", __func__);
+        break;
+
+    case AUX_MU_CNTL_REG:
+        qemu_log_mask(LOG_UNIMP, "%s: AUX_MU_CNTL_REG unsupported\n", __func__);
+        break;
+
+    case AUX_MU_BAUD_REG:
+        qemu_log_mask(LOG_UNIMP, "%s: AUX_MU_BAUD_REG unsupported\n", __func__);
+        break;
+
     default:
-        qemu_log_mask(LOG_GUEST_ERROR,
-                      "bcm2835_aux_write: Bad offset %x\n", (int)offset);
+        qemu_log_mask(LOG_GUEST_ERROR, "%s: Bad offset %"HWADDR_PRIx"\n",
+                      __func__, offset);
     }
 
     bcm2835_aux_update(s);
@@ -132,23 +214,23 @@ static void bcm2835_aux_write(void *opaque, hwaddr offset,
 
 static int bcm2835_aux_can_receive(void *opaque)
 {
-    BCM2835AuxState *s = (BCM2835AuxState *)opaque;
+    BCM2835AuxState *s = opaque;
 
-    return s->read_count < 8;
+    return s->read_count < BCM2835_AUX_RX_FIFO_LEN;
 }
 
-static void bcm2835_aux_put_fifo(void *opaque, uint32_t value)
+static void bcm2835_aux_put_fifo(void *opaque, uint8_t value)
 {
-    BCM2835AuxState *s = (BCM2835AuxState *)opaque;
+    BCM2835AuxState *s = opaque;
     int slot;
 
     slot = s->read_pos + s->read_count;
-    if (slot >= 8) {
-        slot -= 8;
+    if (slot >= BCM2835_AUX_RX_FIFO_LEN) {
+        slot -= BCM2835_AUX_RX_FIFO_LEN;
     }
     s->read_fifo[slot] = value;
     s->read_count++;
-    if (s->read_count == 8) {
+    if (s->read_count == BCM2835_AUX_RX_FIFO_LEN) {
         /* buffer full */
     }
     bcm2835_aux_update(s);
@@ -159,27 +241,25 @@ static void bcm2835_aux_receive(void *opaque, const uint8_t *buf, int size)
     bcm2835_aux_put_fifo(opaque, *buf);
 }
 
-static void bcm2835_aux_event(void *opaque, int event)
-{
-    if (event == CHR_EVENT_BREAK) {
-        bcm2835_aux_put_fifo(opaque, 0x400);
-    }
-}
-
 static const MemoryRegionOps bcm2835_aux_ops = {
     .read = bcm2835_aux_read,
     .write = bcm2835_aux_write,
     .endianness = DEVICE_NATIVE_ENDIAN,
+    .valid.min_access_size = 4,
+    .valid.max_access_size = 4,
 };
 
 static const VMStateDescription vmstate_bcm2835_aux = {
-    .name = "bcm2835_aux",
-    .version_id = 2,
-    .minimum_version_id = 2,
+    .name = TYPE_BCM2835_AUX,
+    .version_id = 1,
+    .minimum_version_id = 1,
     .fields = (VMStateField[]) {
-        VMSTATE_UINT32_ARRAY(read_fifo, BCM2835AuxState, 8),
-        VMSTATE_INT32(read_pos, BCM2835AuxState),
-        VMSTATE_INT32(read_count, BCM2835AuxState),
+        VMSTATE_UINT8_ARRAY(read_fifo, BCM2835AuxState,
+                            BCM2835_AUX_RX_FIFO_LEN),
+        VMSTATE_UINT8(read_pos, BCM2835AuxState),
+        VMSTATE_UINT8(read_count, BCM2835AuxState),
+        VMSTATE_UINT8(ier, BCM2835AuxState),
+        VMSTATE_UINT8(iir, BCM2835AuxState),
         VMSTATE_END_OF_LIST()
     }
 };
@@ -190,7 +270,7 @@ static void bcm2835_aux_init(Object *obj)
     BCM2835AuxState *s = BCM2835_AUX(obj);
 
     memory_region_init_io(&s->iomem, OBJECT(s), &bcm2835_aux_ops, s,
-                          "bcm2835_aux", 0x100);
+                          TYPE_BCM2835_AUX, 0x100);
     sysbus_init_mmio(sbd, &s->iomem);
     sysbus_init_irq(sbd, &s->irq);
 }
@@ -199,14 +279,16 @@ static void bcm2835_aux_realize(DeviceState *dev, Error **errp)
 {
     BCM2835AuxState *s = BCM2835_AUX(dev);
 
-    /* FIXME use a qdev chardev prop instead of qemu_char_get_next_serial() */
-    s->chr = qemu_char_get_next_serial();
-
     if (s->chr) {
         qemu_chr_add_handlers(s->chr, bcm2835_aux_can_receive,
-                              bcm2835_aux_receive, bcm2835_aux_event, s);
+                              bcm2835_aux_receive, NULL, s);
     }
 }
+
+static Property bcm2835_aux_props[] = {
+    DEFINE_PROP_CHR("chardev", BCM2835AuxState, chr),
+    DEFINE_PROP_END_OF_LIST(),
+};
 
 static void bcm2835_aux_class_init(ObjectClass *oc, void *data)
 {
@@ -214,8 +296,8 @@ static void bcm2835_aux_class_init(ObjectClass *oc, void *data)
 
     dc->realize = bcm2835_aux_realize;
     dc->vmsd = &vmstate_bcm2835_aux;
-    /* Reason: realize() method uses qemu_char_get_next_serial() */
-    dc->cannot_instantiate_with_device_add_yet = true;
+    set_bit(DEVICE_CATEGORY_INPUT, dc->categories);
+    dc->props = bcm2835_aux_props;
 }
 
 static const TypeInfo bcm2835_aux_info = {

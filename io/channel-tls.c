@@ -18,6 +18,8 @@
  *
  */
 
+#include "qemu/osdep.h"
+#include "qapi/error.h"
 #include "io/channel-tls.h"
 #include "trace.h"
 

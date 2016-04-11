@@ -24,6 +24,8 @@
  * THE SOFTWARE.
  *
  */
+#include "qemu/osdep.h"
+#include "qapi/error.h"
 #include "cpu.h"
 #include "sysemu/sysemu.h"
 #include "sysemu/char.h"
@@ -35,7 +37,8 @@
 #include "hw/pci/pci.h"
 #include "hw/pci-host/spapr.h"
 #include "hw/ppc/spapr_drc.h"
-
+#include "qemu/help_option.h"
+#include "qemu/bcd.h"
 #include <libfdt.h>
 
 struct rtas_error_log {
@@ -386,6 +389,13 @@ static void spapr_powerdown_req(Notifier *n, void *opaque)
     qemu_irq_pulse(xics_get_qirq(spapr->icp, spapr->check_exception_irq));
 }
 
+static void spapr_hotplug_set_signalled(uint32_t drc_index)
+{
+    sPAPRDRConnector *drc = spapr_dr_connector_by_index(drc_index);
+    sPAPRDRConnectorClass *drck = SPAPR_DR_CONNECTOR_GET_CLASS(drc);
+    drck->set_signalled(drc);
+}
+
 static void spapr_hotplug_req_event(uint8_t hp_id, uint8_t hp_action,
                                     sPAPRDRConnectorType drc_type,
                                     uint32_t drc)
@@ -452,6 +462,10 @@ static void spapr_hotplug_req_event(uint8_t hp_id, uint8_t hp_action,
 
     rtas_event_log_queue(RTAS_LOG_TYPE_HOTPLUG, new_hp, true);
 
+    if (hp->hotplug_action == RTAS_LOG_V6_HP_ACTION_ADD) {
+        spapr_hotplug_set_signalled(drc);
+    }
+
     qemu_irq_pulse(xics_get_qirq(spapr->icp, spapr->check_exception_irq));
 }
 
@@ -459,7 +473,7 @@ void spapr_hotplug_req_add_by_index(sPAPRDRConnector *drc)
 {
     sPAPRDRConnectorClass *drck = SPAPR_DR_CONNECTOR_GET_CLASS(drc);
     sPAPRDRConnectorType drc_type = drck->get_type(drc);
-    uint32 index = drck->get_index(drc);
+    uint32_t index = drck->get_index(drc);
 
     spapr_hotplug_req_event(RTAS_LOG_V6_HP_ID_DRC_INDEX,
                             RTAS_LOG_V6_HP_ACTION_ADD, drc_type, index);
@@ -469,7 +483,7 @@ void spapr_hotplug_req_remove_by_index(sPAPRDRConnector *drc)
 {
     sPAPRDRConnectorClass *drck = SPAPR_DR_CONNECTOR_GET_CLASS(drc);
     sPAPRDRConnectorType drc_type = drck->get_type(drc);
-    uint32 index = drck->get_index(drc);
+    uint32_t index = drck->get_index(drc);
 
     spapr_hotplug_req_event(RTAS_LOG_V6_HP_ID_DRC_INDEX,
                             RTAS_LOG_V6_HP_ACTION_REMOVE, drc_type, index);
@@ -587,7 +601,8 @@ out_no_events:
 void spapr_events_init(sPAPRMachineState *spapr)
 {
     QTAILQ_INIT(&spapr->pending_events);
-    spapr->check_exception_irq = xics_alloc(spapr->icp, 0, 0, false);
+    spapr->check_exception_irq = xics_alloc(spapr->icp, 0, 0, false,
+                                            &error_fatal);
     spapr->epow_notifier.notify = spapr_powerdown_req;
     qemu_register_powerdown_notifier(&spapr->epow_notifier);
     spapr_rtas_register(RTAS_CHECK_EXCEPTION, "check-exception",

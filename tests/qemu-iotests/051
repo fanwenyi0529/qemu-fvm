@@ -218,7 +218,7 @@ run_qemu -drive driver=null-co,cache=invalid_value
 
 for cache in writeback writethrough unsafe invalid_value; do
     echo -e "info block\ninfo block file\ninfo block backing\ninfo block backing-file" | \
-    run_qemu -drive file="$TEST_IMG",cache=$cache,backing.file.filename="$TEST_IMG.base",backing.cache.no-flush=on,backing.cache.writeback=on,backing.node-name=backing,backing.file.node-name=backing-file,file.node-name=file,if=none,id=$device_id -nodefaults
+    run_qemu -drive file="$TEST_IMG",cache=$cache,backing.file.filename="$TEST_IMG.base",backing.cache.no-flush=on,backing.node-name=backing,backing.file.node-name=backing-file,file.node-name=file,if=none,id=$device_id -nodefaults
 done
 
 echo
@@ -261,6 +261,24 @@ run_qemu -drive file="$TEST_IMG",bps_wr_max=1234,throttling.bps-write-max=5678
 
 run_qemu -drive file="$TEST_IMG",iops_size=1234,throttling.iops-size=5678
 run_qemu -drive file="$TEST_IMG",readonly=on,read-only=off
+
+echo
+echo === Catching negative/large throttling values ===
+echo
+
+run_qemu -drive file="$TEST_IMG",iops=-1
+run_qemu -drive file="$TEST_IMG",bps=-2
+run_qemu -drive file="$TEST_IMG",bps_rd=-3
+run_qemu -drive file="$TEST_IMG",bps_rd_max=-3
+run_qemu -drive file="$TEST_IMG",throttling.iops-total=-4
+run_qemu -drive file="$TEST_IMG",throttling.bps-total=-5
+# These are accepted
+run_qemu -drive file="$TEST_IMG",bps=0
+run_qemu -drive file="$TEST_IMG",bps=1
+run_qemu -drive file="$TEST_IMG",bps=1000000000000000
+# While these are not
+run_qemu -drive file="$TEST_IMG",bps=1000000000000001
+run_qemu -drive file="$TEST_IMG",bps=9999999999999999
 
 echo
 echo === Parsing protocol from file name ===

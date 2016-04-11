@@ -52,9 +52,7 @@
  *
  */
 
-#include <assert.h>
-#include <stddef.h>             /* offsetof */
-#include <stdio.h>              /* fprintf */
+#include "qemu/osdep.h"
 
 #include <zlib.h>               /* crc32 */
 
@@ -74,7 +72,6 @@
 #include "disas/disas.h"        /* lookup_symbol */
 #include "elf.h"                /* EM_MIPS (needed by loader.h) */
 #include "exec/address-spaces.h" /* get_system_memory */
-#include "exec/ram_addr.h"      /* qemu_get_ram_ptr */
 #include "hw/loader.h"          /* load_elf, load_image_targphys */
 #include "hw/mips/cpudevs.h"    /* cpu_mips_kseg0_to_phys, ... */
 
@@ -83,6 +80,7 @@
 #include "hw/sysbus.h"          /* SysBusDevice */
 #include "hw/vlynq.h"           /* vlynq_create_bus */
 
+#include "qapi/error.h"          /* error_abort */
 #include "target-mips/cpu-qom.h" /* mips_cpu_do_interrupt */
 
 #if 0 /* Support Titan SoC. */
@@ -2336,7 +2334,7 @@ static void ar7_timer_write(unsigned timer_index, uint32_t addr, uint32_t val)
             timer_del(timer->qemu_timer);
         }
     } else if (addr == TIMER_LOAD) {
-        timer->time = val * (get_ticks_per_sec() / io_frequency);
+        timer->time = val * (NANOSECONDS_PER_SECOND / io_frequency);
     }
 }
 
@@ -2801,12 +2799,12 @@ static void watchdog_trigger(void)
         timer_del(ar7->wd_timer);
     } else {
         int64_t t = ((uint64_t)wdt->change * (uint64_t)wdt->prescale) *
-                    (get_ticks_per_sec() / io_frequency);
+                    (NANOSECONDS_PER_SECOND / io_frequency);
         //~ logout("change   = 0x%x\n", wdt->change);
         //~ logout("prescale = 0x%x\n", wdt->prescale);
         TRACE(WDOG, logout("trigger value = %u ms\n",
-              (unsigned)(t * 1000 / get_ticks_per_sec())));
-        //~ logout("trigger value = %u\n", (unsigned)(get_ticks_per_sec() / 1000000));
+              (unsigned)(t * 1000 / NANOSECONDS_PER_SECOND)));
+        //~ logout("trigger value = %u\n", (unsigned)(NANOSECONDS_PER_SECOND / 1000000));
         timer_mod(ar7->wd_timer, qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) + t);
     }
 }
@@ -3697,7 +3695,7 @@ static void kernel_load(CPUMIPSState *env)
     kernel_size = load_elf(loaderparams.kernel_filename,
                            cpu_mips_kseg0_to_phys, NULL,
                            &kernel_addr, &kernel_low, &kernel_high,
-                           current_cpu->bigendian, EM_MIPS, 1);
+                           current_cpu->bigendian, EM_MIPS, 1, 0);
     if (kernel_size < 0) {
         kernel_size = load_image_targphys(loaderparams.kernel_filename,
                                           KERNEL_LOAD_ADDR,
@@ -3733,12 +3731,14 @@ static void kernel_init(CPUMIPSState *env)
     /* TODO: use code from Malta for command line setup. */
     if (loaderparams.kernel_cmdline && *loaderparams.kernel_cmdline) {
         /* Load kernel parameters (argv, envp) from file. */
+#if 0 // TBD
         // TODO: use cpu_physical_memory_write(bdloc, (void *)kernel_cmdline, len + 1)
         uint8_t *address = qemu_get_ram_ptr(INITRD_LOAD_ADDR - KERNEL_LOAD_ADDR);
         int argc;
         uint32_t *argv;
         uint32_t *arg0;
-        target_ulong size = load_image(loaderparams.kernel_cmdline, address);
+        target_ulong size = load_image_targphys(loaderparams.kernel_cmdline,
+            KERNEL_LOAD_ADDR, loaderparams.ram_size);
         target_ulong i;
         if (size == (target_ulong) -1) {
             fprintf(stderr, "qemu: could not load kernel parameters '%s'\n",
@@ -3773,6 +3773,12 @@ static void kernel_init(CPUMIPSState *env)
                 }
             }
         }
+#else
+        fprintf(stderr,
+                "qemu: missing code for command line parameters '%s'\n",
+                loaderparams.kernel_cmdline);
+        exit(1);
+#endif
     }
 }
 

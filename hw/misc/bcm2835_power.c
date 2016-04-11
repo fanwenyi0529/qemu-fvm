@@ -3,8 +3,9 @@
  * This code is licensed under the GNU GPLv2 and later.
  */
 
-#include "hw/arm/bcm2835_mbox.h"
+#include "qemu/osdep.h"
 #include "hw/misc/bcm2835_power.h"
+#include "hw/misc/bcm2835_mbox_defs.h"
 
 static uint64_t bcm2835_power_read(void *opaque, hwaddr offset, unsigned size)
 {

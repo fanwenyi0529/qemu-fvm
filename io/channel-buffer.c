@@ -18,6 +18,7 @@
  *
  */
 
+#include "qemu/osdep.h"
 #include "io/channel-buffer.h"
 #include "io/channel-watch.h"
 #include "qemu/sockets.h"
@@ -31,7 +32,7 @@ qio_channel_buffer_new(size_t capacity)
     ioc = QIO_CHANNEL_BUFFER(object_new(TYPE_QIO_CHANNEL_BUFFER));
 
     if (capacity) {
-        ioc->data = g_new0(char, capacity);
+        ioc->data = g_new0(uint8_t, capacity);
         ioc->capacity = capacity;
     }
 

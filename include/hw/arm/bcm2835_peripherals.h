@@ -21,14 +21,13 @@
 #include "hw/misc/bcm2835_mphi.h"
 #include "hw/misc/bcm2835_power.h"
 #include "hw/misc/bcm2835_property.h"
-#include "hw/misc/bcm2835_sbm.h"
-#include "hw/misc/bcm2835_vchiq.h"
-#include "hw/sd/bcm2835_emmc.h"
+#include "hw/misc/bcm2835_mbox.h"
+#include "hw/sd/sdhci.h"
 #include "hw/timer/bcm2835_st.h"
 #include "hw/timer/bcm2835_timer.h"
 #include "hw/usb/bcm2835_usb.h"
 
-#define TYPE_BCM2835_PERIPHERALS "bcm2835_peripherals"
+#define TYPE_BCM2835_PERIPHERALS "bcm2835-peripherals"
 #define BCM2835_PERIPHERALS(obj) \
     OBJECT_CHECK(BCM2835PeripheralState, (obj), TYPE_BCM2835_PERIPHERALS)
 
@@ -43,15 +42,14 @@ typedef struct BCM2835PeripheralState {
 
     SysBusDevice *uart0;
     BCM2835AuxState aux;
-    BCM2835FbState fb;
-    BCM2835DmaState dma;
-    BCM2835IcState ic;
+    BCM2835FBState fb;
+    BCM2835DMAState dma;
+    BCM2835ICState ic;
     BCM2835MphiState mphi;
     BCM2835PowerState power;
     BCM2835PropertyState property;
-    BCM2835SbmState sbm;
-    BCM2835VchiqState vchiq;
-    BCM2835EmmcState emmc;
+    BCM2835MboxState mboxes;
+    SDHCIState sdhci;
     BCM2835StState st;
     BCM2835TimerState timer;
     BCM2835UsbState usb;

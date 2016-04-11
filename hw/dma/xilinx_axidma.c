@@ -22,7 +22,9 @@
  * THE SOFTWARE.
  */
 
+#include "qemu/osdep.h"
 #include "hw/sysbus.h"
+#include "qapi/error.h"
 #include "qemu/timer.h"
 #include "hw/ptimer.h"
 #include "qemu/log.h"

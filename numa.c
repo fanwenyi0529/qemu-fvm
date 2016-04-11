@@ -22,6 +22,7 @@
  * THE SOFTWARE.
  */
 
+#include "qemu/osdep.h"
 #include "sysemu/numa.h"
 #include "exec/cpu-common.h"
 #include "qemu/bitmap.h"
@@ -30,7 +31,6 @@
 #include "include/exec/cpu-common.h" /* for RAM_ADDR_FMT */
 #include "qapi-visit.h"
 #include "qapi/opts-visitor.h"
-#include "qapi/dealloc-visitor.h"
 #include "hw/boards.h"
 #include "sysemu/hostmem.h"
 #include "qmp-commands.h"
@@ -218,7 +218,7 @@ static int parse_numa(void *opaque, QemuOpts *opts, Error **errp)
 
     {
         OptsVisitor *ov = opts_visitor_new(opts);
-        visit_type_NumaOptions(opts_get_visitor(ov), &object, NULL, &err);
+        visit_type_NumaOptions(opts_get_visitor(ov), NULL, &object, &err);
         opts_visitor_cleanup(ov);
     }
 
@@ -228,7 +228,7 @@ static int parse_numa(void *opaque, QemuOpts *opts, Error **errp)
 
     switch (object->type) {
     case NUMA_OPTIONS_KIND_NODE:
-        numa_node_parse(object->u.node, opts, &err);
+        numa_node_parse(object->u.node.data, opts, &err);
         if (err) {
             goto error;
         }
@@ -242,13 +242,7 @@ static int parse_numa(void *opaque, QemuOpts *opts, Error **errp)
 
 error:
     error_report_err(err);
-
-    if (object) {
-        QapiDeallocVisitor *dv = qapi_dealloc_visitor_new();
-        visit_type_NumaOptions(qapi_dealloc_get_visitor(dv),
-                               &object, NULL, NULL);
-        qapi_dealloc_visitor_cleanup(dv);
-    }
+    qapi_free_NumaOptions(object);
 
     return -1;
 }
@@ -418,12 +412,15 @@ static void allocate_system_memory_nonnuma(MemoryRegion *mr, Object *owner,
         Error *err = NULL;
         memory_region_init_ram_from_file(mr, owner, name, ram_size, false,
                                          mem_path, &err);
-
-        /* Legacy behavior: if allocation failed, fall back to
-         * regular RAM allocation.
-         */
         if (err) {
             error_report_err(err);
+            if (mem_prealloc) {
+                exit(1);
+            }
+
+            /* Legacy behavior: if allocation failed, fall back to
+             * regular RAM allocation.
+             */
             memory_region_init_ram(mr, owner, name, ram_size, &error_fatal);
         }
 #else
@@ -450,17 +447,13 @@ void memory_region_allocate_system_memory(MemoryRegion *mr, Object *owner,
 
     memory_region_init(mr, owner, name, ram_size);
     for (i = 0; i < MAX_NODES; i++) {
-        Error *local_err = NULL;
         uint64_t size = numa_info[i].node_mem;
         HostMemoryBackend *backend = numa_info[i].node_memdev;
         if (!backend) {
             continue;
         }
-        MemoryRegion *seg = host_memory_backend_get_memory(backend, &local_err);
-        if (local_err) {
-            error_report_err(local_err);
-            exit(1);
-        }
+        MemoryRegion *seg = host_memory_backend_get_memory(backend,
+                                                           &error_fatal);
 
         if (memory_region_is_mapped(seg)) {
             char *path = object_get_canonical_path_component(OBJECT(backend));
@@ -489,7 +482,7 @@ static void numa_stat_memory_devices(uint64_t node_mem[])
         if (value) {
             switch (value->type) {
             case MEMORY_DEVICE_INFO_KIND_DIMM:
-                node_mem[value->u.dimm->node] += value->u.dimm->size;
+                node_mem[value->u.dimm.data->node] += value->u.dimm.data->size;
                 break;
             default:
                 break;

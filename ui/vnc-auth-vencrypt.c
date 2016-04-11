@@ -24,7 +24,9 @@
  * THE SOFTWARE.
  */
 
+#include "qemu/osdep.h"
 #include "vnc.h"
+#include "qapi/error.h"
 #include "qemu/main-loop.h"
 
 static void start_auth_vencrypt_subauth(VncState *vs)

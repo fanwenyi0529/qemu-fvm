@@ -21,6 +21,7 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+#include "qemu/osdep.h"
 #include "hw/hw.h"
 #include "hw/pci/pci.h"
 #include "net/net.h"
@@ -153,6 +154,10 @@ static void ne2000_update_irq(NE2000State *s)
 static int ne2000_buffer_full(NE2000State *s)
 {
     int avail, index, boundary;
+
+    if (s->stop <= s->start) {
+        return 1;
+    }
 
     index = s->curpag << 8;
     boundary = s->boundary << 8;

@@ -27,7 +27,8 @@
  * using the "VM" connection type.  See that for details.
  */
 
-#include <stdint.h>
+#include "qemu/osdep.h"
+#include "qapi/error.h"
 #include "qemu/timer.h"
 #include "sysemu/char.h"
 #include "sysemu/sysemu.h"

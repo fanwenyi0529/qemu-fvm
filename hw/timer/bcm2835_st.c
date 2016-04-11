@@ -5,25 +5,33 @@
 
 /* Based on several timers code found in various QEMU source files. */
 
+#include "qemu/osdep.h"
 #include "hw/timer/bcm2835_st.h"
 
 static void bcm2835_st_update(BCM2835StState *s)
 {
     int64_t now = qemu_clock_get_us(QEMU_CLOCK_VIRTUAL);
     uint32_t clo = (uint32_t)now;
-    uint32_t delta = -1;
+    uint32_t delta;
+    bool set = false;
     int i;
 
     /* Calculate new "next" value and reschedule */
     for (i = 0; i < 4; i++) {
         if (!(s->match & (1 << i))) {
-            if (s->compare[i] - clo < delta) {
+            if (!set || s->compare[i] - clo < delta) {
+                set = true;
                 s->next = s->compare[i];
                 delta = s->next - clo;
             }
         }
     }
-    timer_mod(s->timer, now + delta);
+
+    if (set) {
+        timer_mod(s->timer, now + delta);
+    } else {
+        timer_del(s->timer);
+    }
 }
 
 static void bcm2835_st_tick(void *opaque)
@@ -47,7 +55,7 @@ static uint64_t bcm2835_st_read(void *opaque, hwaddr offset,
 {
     BCM2835StState *s = (BCM2835StState *)opaque;
     uint32_t res = 0;
-    int64_t now = qemu_clock_get_us(QEMU_CLOCK_VIRTUAL);
+    uint64_t now = qemu_clock_get_us(QEMU_CLOCK_VIRTUAL);
 
     assert(size == 4);
 
@@ -98,7 +106,7 @@ static void bcm2835_st_write(void *opaque, hwaddr offset,
     case 0x00:
         s->match &= ~value & 0x0f;
         for (i = 0; i < 4; i++) {
-            if (!(s->match & (1 << i))) {
+            if (value & (1 << i)) {
                 qemu_set_irq(s->irq[i], 0);
             }
         }
@@ -151,7 +159,7 @@ static void bcm2835_st_init(Object *obj)
     }
 
     memory_region_init_io(&s->iomem, obj, &bcm2835_st_ops, s,
-                          TYPE_BCM2835_ST, 0x1000);
+                          TYPE_BCM2835_ST, 0x20);
     sysbus_init_mmio(SYS_BUS_DEVICE(s), &s->iomem);
 }
 

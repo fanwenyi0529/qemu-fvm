@@ -2,7 +2,6 @@
 #define HW_PC_H
 
 #include "qemu-common.h"
-#include "qemu/typedefs.h"
 #include "exec/memory.h"
 #include "hw/boards.h"
 #include "hw/isa/isa.h"
@@ -17,6 +16,7 @@
 #include "hw/boards.h"
 #include "hw/compat.h"
 #include "hw/mem/pc-dimm.h"
+#include "hw/mem/nvdimm.h"
 
 #define HPET_INTCAP "hpet-intcap"
 
@@ -45,20 +45,33 @@ struct PCMachineState {
 
     /* State for other subsystems/APIs: */
     MemoryHotplugState hotplug_memory;
+    Notifier machine_done;
 
     /* Pointers to devices and objects: */
     HotplugHandler *acpi_dev;
     ISADevice *rtc;
     PCIBus *bus;
+    FWCfgState *fw_cfg;
 
     /* Configuration options: */
     uint64_t max_ram_below_4g;
     OnOffAuto vmport;
     OnOffAuto smm;
-    bool nvdimm;
+
+    AcpiNVDIMMState acpi_nvdimm_state;
 
     /* RAM information (sizes, addresses, configuration): */
     ram_addr_t below_4g_mem_size, above_4g_mem_size;
+
+    /* CPU and apic information: */
+    bool apic_xrupt_override;
+    unsigned apic_id_limit;
+    CPUArchIdList *possible_cpus;
+
+    /* NUMA information: */
+    uint64_t numa_nodes;
+    uint64_t *node_mem;
+    uint64_t *node_cpu;
 };
 
 #define PC_MACHINE_ACPI_DEVICE_PROP "acpi-device"
@@ -120,6 +133,9 @@ struct PCMachineClass {
     bool has_reserved_memory;
     bool enforce_aligned_dimm;
     bool broken_reserved_end;
+
+    /* TSC rate migration: */
+    bool save_tsc_khz;
 };
 
 #define TYPE_PC_MACHINE "generic-pc-machine"
@@ -147,21 +163,6 @@ typedef struct PcPciInfo {
 #define ACPI_PM_PROP_GPE0_BLK "gpe0_blk"
 #define ACPI_PM_PROP_GPE0_BLK_LEN "gpe0_blk_len"
 #define ACPI_PM_PROP_TCO_ENABLED "enable_tco"
-
-struct PcGuestInfo {
-    bool isapc_ram_fw;
-    hwaddr ram_size, ram_size_below_4g;
-    unsigned apic_id_limit;
-    bool apic_xrupt_override;
-    uint64_t numa_nodes;
-    uint64_t *node_mem;
-    uint64_t *node_cpu;
-    FWCfgState *fw_cfg;
-    int legacy_acpi_table_size;
-    bool has_acpi_build;
-    bool has_reserved_memory;
-    bool rsdp_in_ram;
-};
 
 /* parallel.c */
 
@@ -229,7 +230,7 @@ void pc_cpus_init(PCMachineState *pcms);
 void pc_hot_add_cpu(const int64_t id, Error **errp);
 void pc_acpi_init(const char *default_dsdt);
 
-PcGuestInfo *pc_guest_info_init(PCMachineState *pcms);
+void pc_guest_info_init(PCMachineState *pcms);
 
 #define PCI_HOST_PROP_PCI_HOLE_START   "pci-hole-start"
 #define PCI_HOST_PROP_PCI_HOLE_END     "pci-hole-end"
@@ -242,20 +243,18 @@ PcGuestInfo *pc_guest_info_init(PCMachineState *pcms);
 void pc_pci_as_mapping_init(Object *owner, MemoryRegion *system_memory,
                             MemoryRegion *pci_address_space);
 
-FWCfgState *xen_load_linux(PCMachineState *pcms,
-                           PcGuestInfo *guest_info);
-FWCfgState *pc_memory_init(PCMachineState *pcms,
-                           MemoryRegion *system_memory,
-                           MemoryRegion *rom_memory,
-                           MemoryRegion **ram_memory,
-                           PcGuestInfo *guest_info);
+void xen_load_linux(PCMachineState *pcms);
+void pc_memory_init(PCMachineState *pcms,
+                    MemoryRegion *system_memory,
+                    MemoryRegion *rom_memory,
+                    MemoryRegion **ram_memory);
 qemu_irq pc_allocate_cpu_irq(void);
 DeviceState *pc_vga_init(ISABus *isa_bus, PCIBus *pci_bus);
 void pc_basic_device_init(ISABus *isa_bus, qemu_irq *gsi,
                           ISADevice **rtc_state,
                           bool create_fdctrl,
                           bool no_vmport,
-                          uint32 hpet_irqs);
+                          uint32_t hpet_irqs);
 void pc_init_ne2k_isa(ISABus *bus, NICInfo *nd);
 void pc_cmos_init(PCMachineState *pcms,
                   BusState *ide0, BusState *ide1,
@@ -268,6 +267,9 @@ typedef void (*cpu_set_smm_t)(int smm, void *arg);
 void ioapic_init_gsi(GSIState *gsi_state, const char *parent_name);
 
 ISADevice *pc_find_fdc0(void);
+int cmos_get_fd_drive_type(FloppyDriveType fd0);
+
+#define FW_CFG_IO_BASE     0x510
 
 /* acpi_piix.c */
 
@@ -855,7 +857,7 @@ bool e820_get_entry(int, uint32_t, uint64_t *, uint64_t *);
     { \
         type_register(&pc_machine_type_##suffix); \
     } \
-    machine_init(pc_machine_init_##suffix)
+    type_init(pc_machine_init_##suffix)
 
 extern void igd_passthrough_isa_bridge_create(PCIBus *bus, uint16_t gpu_dev_id);
 #endif

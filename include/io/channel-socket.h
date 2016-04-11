@@ -67,7 +67,7 @@ qio_channel_socket_new(void);
 /**
  * qio_channel_socket_new_fd:
  * @fd: the socket file descriptor
- * @errp: pointer to an uninitialized error object
+ * @errp: pointer to a NULL-initialized error object
  *
  * Create a channel for performing I/O on the socket
  * connection represented by the file descriptor @fd.
@@ -83,7 +83,7 @@ qio_channel_socket_new_fd(int fd,
  * qio_channel_socket_connect_sync:
  * @ioc: the socket channel object
  * @addr: the address to connect to
- * @errp: pointer to an uninitialized error object
+ * @errp: pointer to a NULL-initialized error object
  *
  * Attempt to connect to the address @addr. This method
  * will run in the foreground so the caller will not regain
@@ -105,7 +105,9 @@ int qio_channel_socket_connect_sync(QIOChannelSocket *ioc,
  * Attempt to connect to the address @addr. This method
  * will run in the background so the caller will regain
  * execution control immediately. The function @callback
- * will be invoked on completion or failure.
+ * will be invoked on completion or failure. The @addr
+ * parameter will be copied, so may be freed as soon
+ * as this function returns without waiting for completion.
  */
 void qio_channel_socket_connect_async(QIOChannelSocket *ioc,
                                       SocketAddress *addr,
@@ -118,7 +120,7 @@ void qio_channel_socket_connect_async(QIOChannelSocket *ioc,
  * qio_channel_socket_listen_sync:
  * @ioc: the socket channel object
  * @addr: the address to listen to
- * @errp: pointer to an uninitialized error object
+ * @errp: pointer to a NULL-initialized error object
  *
  * Attempt to listen to the address @addr. This method
  * will run in the foreground so the caller will not regain
@@ -140,7 +142,9 @@ int qio_channel_socket_listen_sync(QIOChannelSocket *ioc,
  * Attempt to listen to the address @addr. This method
  * will run in the background so the caller will regain
  * execution control immediately. The function @callback
- * will be invoked on completion or failure.
+ * will be invoked on completion or failure. The @addr
+ * parameter will be copied, so may be freed as soon
+ * as this function returns without waiting for completion.
  */
 void qio_channel_socket_listen_async(QIOChannelSocket *ioc,
                                      SocketAddress *addr,
@@ -154,7 +158,7 @@ void qio_channel_socket_listen_async(QIOChannelSocket *ioc,
  * @ioc: the socket channel object
  * @localAddr: the address to local bind address
  * @remoteAddr: the address to remote peer address
- * @errp: pointer to an uninitialized error object
+ * @errp: pointer to a NULL-initialized error object
  *
  * Attempt to initialize a datagram socket bound to
  * @localAddr and communicating with peer @remoteAddr.
@@ -181,6 +185,9 @@ int qio_channel_socket_dgram_sync(QIOChannelSocket *ioc,
  * This method will run in the background so the caller
  * will regain execution control immediately. The function
  * @callback will be invoked on completion or failure.
+ * The @localAddr and @remoteAddr parameters will be copied,
+ * so may be freed as soon as this function returns without
+ * waiting for completion.
  */
 void qio_channel_socket_dgram_async(QIOChannelSocket *ioc,
                                     SocketAddress *localAddr,
@@ -193,7 +200,7 @@ void qio_channel_socket_dgram_async(QIOChannelSocket *ioc,
 /**
  * qio_channel_socket_get_local_address:
  * @ioc: the socket channel object
- * @errp: pointer to an uninitialized error object
+ * @errp: pointer to a NULL-initialized error object
  *
  * Get the string representation of the local socket
  * address. A pointer to the allocated address information
@@ -210,7 +217,7 @@ qio_channel_socket_get_local_address(QIOChannelSocket *ioc,
 /**
  * qio_channel_socket_get_remote_address:
  * @ioc: the socket channel object
- * @errp: pointer to an uninitialized error object
+ * @errp: pointer to a NULL-initialized error object
  *
  * Get the string representation of the local socket
  * address. A pointer to the allocated address information
@@ -228,7 +235,7 @@ qio_channel_socket_get_remote_address(QIOChannelSocket *ioc,
 /**
  * qio_channel_socket_accept:
  * @ioc: the socket channel object
- * @errp: pointer to an uninitialized error object
+ * @errp: pointer to a NULL-initialized error object
  *
  * If the socket represents a server, then this accepts
  * a new client connection. The returned channel will

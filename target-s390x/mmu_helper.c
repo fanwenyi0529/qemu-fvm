@@ -15,6 +15,7 @@
  * GNU General Public License for more details.
  */
 
+#include "qemu/osdep.h"
 #include "qemu/error-report.h"
 #include "exec/address-spaces.h"
 #include "cpu.h"
@@ -89,7 +90,7 @@ static void trigger_page_fault(CPUS390XState *env, target_ulong vaddr,
 
     tec = vaddr | (rw == MMU_DATA_STORE ? FS_WRITE : FS_READ) | asc >> 46;
 
-    DPRINTF("%s: vaddr=%016" PRIx64 " bits=%d\n", __func__, vaddr, bits);
+    DPRINTF("%s: trans_exc_code=%016" PRIx64 "\n", __func__, tec);
 
     if (!exc) {
         return;

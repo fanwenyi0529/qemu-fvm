@@ -10,6 +10,7 @@
  * See the COPYING file in the top-level directory.
  */
 
+#include "qemu/osdep.h"
 #include "hw/pci/pci.h"
 #include "hw/pci/pci_bus.h"
 #include "hw/pci/pci_host.h"
@@ -248,7 +249,7 @@ static int pxb_dev_init_common(PCIDevice *dev, bool pcie)
     PCI_HOST_BRIDGE(ds)->bus = bus;
 
     if (pxb_register_bus(dev, bus)) {
-        return -EINVAL;
+        goto err_register_bus;
     }
 
     qdev_init_nofail(ds);
@@ -262,6 +263,12 @@ static int pxb_dev_init_common(PCIDevice *dev, bool pcie)
 
     pxb_dev_list = g_list_insert_sorted(pxb_dev_list, pxb, pxb_compare);
     return 0;
+
+err_register_bus:
+    object_unref(OBJECT(bds));
+    object_unparent(OBJECT(bus));
+    object_unref(OBJECT(ds));
+    return -EINVAL;
 }
 
 static int pxb_dev_initfn(PCIDevice *dev)
@@ -282,7 +289,7 @@ static void pxb_dev_exitfn(PCIDevice *pci_dev)
 }
 
 static Property pxb_dev_properties[] = {
-    /* Note: 0 is not a legal a PXB bus number. */
+    /* Note: 0 is not a legal PXB bus number. */
     DEFINE_PROP_UINT8("bus_nr", PXBDev, bus_nr, 0),
     DEFINE_PROP_UINT16("numa_node", PXBDev, numa_node, NUMA_NODE_UNASSIGNED),
     DEFINE_PROP_END_OF_LIST(),
@@ -301,6 +308,7 @@ static void pxb_dev_class_init(ObjectClass *klass, void *data)
 
     dc->desc = "PCI Expander Bridge";
     dc->props = pxb_dev_properties;
+    set_bit(DEVICE_CATEGORY_BRIDGE, dc->categories);
 }
 
 static const TypeInfo pxb_dev_info = {
@@ -333,6 +341,7 @@ static void pxb_pcie_dev_class_init(ObjectClass *klass, void *data)
 
     dc->desc = "PCI Express Expander Bridge";
     dc->props = pxb_dev_properties;
+    set_bit(DEVICE_CATEGORY_BRIDGE, dc->categories);
 }
 
 static const TypeInfo pxb_pcie_dev_info = {
