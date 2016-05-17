@@ -28,6 +28,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..', 'scripts', '
 import qmp
 import qtest
 import struct
+import json
 
 
 # This will not work if arguments contain spaces but is necessary if we
@@ -46,7 +47,7 @@ if os.environ.get('QEMU_OPTIONS'):
 
 imgfmt = os.environ.get('IMGFMT', 'raw')
 imgproto = os.environ.get('IMGPROTO', 'file')
-test_dir = os.environ.get('TEST_DIR', '/var/tmp')
+test_dir = os.environ.get('TEST_DIR')
 output_dir = os.environ.get('OUTPUT_DIR', '.')
 cachemode = os.environ.get('CACHEMODE')
 qemu_default_machine = os.environ.get('QEMU_DEFAULT_MACHINE')
@@ -102,6 +103,11 @@ def create_image(name, size):
         file.write(sector)
         i = i + 512
     file.close()
+
+def image_size(img):
+    '''Return image's virtual size'''
+    r = qemu_img_pipe('info', '--output=json', '-f', imgfmt, img)
+    return json.loads(r)['virtual-size']
 
 test_dir_re = re.compile(r"%s" % test_dir)
 def filter_test_dir(msg):
@@ -348,6 +354,20 @@ class QMPTestCase(unittest.TestCase):
         result = self.vm.qmp('query-block-jobs')
         self.assert_qmp(result, 'return', [])
 
+    def assert_has_block_node(self, node_name=None, file_name=None):
+        """Issue a query-named-block-nodes and assert node_name and/or
+        file_name is present in the result"""
+        def check_equal_or_none(a, b):
+            return a == None or b == None or a == b
+        assert node_name or file_name
+        result = self.vm.qmp('query-named-block-nodes')
+        for x in result["return"]:
+            if check_equal_or_none(x.get("node-name"), node_name) and \
+                    check_equal_or_none(x.get("file"), file_name):
+                return
+        self.assertTrue(False, "Cannot find %s %s in result:\n%s" % \
+                (node_name, file_name, result))
+
     def cancel_and_wait(self, drive='drive0', force=False, resume=False):
         '''Cancel a block job and wait for it to finish, returning the event'''
         result = self.vm.qmp('block-job-cancel', device=drive, force=force)
@@ -440,6 +460,14 @@ def verify_quorum():
 
 def main(supported_fmts=[], supported_oses=['linux']):
     '''Run tests'''
+
+    # We are using TEST_DIR and QEMU_DEFAULT_MACHINE as proxies to
+    # indicate that we're not being run via "check". There may be
+    # other things set up by "check" that individual test cases rely
+    # on.
+    if test_dir is None or qemu_default_machine is None:
+        sys.stderr.write('Please run this test via the "check" script\n')
+        sys.exit(os.EX_USAGE)
 
     debug = '-d' in sys.argv
     verbosity = 1

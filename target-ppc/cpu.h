@@ -2303,7 +2303,7 @@ static inline void cpu_write_xer(CPUPPCState *env, target_ulong xer)
 }
 
 static inline void cpu_get_tb_cpu_state(CPUPPCState *env, target_ulong *pc,
-                                        target_ulong *cs_base, int *flags)
+                                        target_ulong *cs_base, uint32_t *flags)
 {
     *pc = env->nip;
     *cs_base = 0;
@@ -2413,6 +2413,16 @@ static inline bool msr_is_64bit(CPUPPCState *env, target_ulong msr)
     }
 
     return msr & (1ULL << MSR_SF);
+}
+
+/**
+ * Check whether register rx is in the range between start and
+ * start + nregs (as needed by the LSWX and LSWI instructions)
+ */
+static inline bool lsw_reg_in_range(int start, int nregs, int rx)
+{
+    return (start + nregs <= 32 && rx >= start && rx < start + nregs) ||
+           (start + nregs > 32 && (rx >= start || rx < start + nregs - 32));
 }
 
 extern void (*cpu_ppc_hypercall)(PowerPCCPU *);

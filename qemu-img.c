@@ -435,8 +435,7 @@ static int img_create(int argc, char **argv)
 
     if (qemu_opts_foreach(&qemu_object_opts,
                           user_creatable_add_opts_foreach,
-                          NULL, &local_err)) {
-        error_report_err(local_err);
+                          NULL, NULL)) {
         goto fail;
     }
 
@@ -598,7 +597,6 @@ static int img_check(int argc, char **argv)
     bool writethrough;
     ImageCheck *check;
     bool quiet = false;
-    Error *local_err = NULL;
     bool image_opts = false;
 
     fmt = NULL;
@@ -679,8 +677,7 @@ static int img_check(int argc, char **argv)
 
     if (qemu_opts_foreach(&qemu_object_opts,
                           user_creatable_add_opts_foreach,
-                          NULL, &local_err)) {
-        error_report_err(local_err);
+                          NULL, NULL)) {
         return 1;
     }
 
@@ -871,8 +868,7 @@ static int img_commit(int argc, char **argv)
 
     if (qemu_opts_foreach(&qemu_object_opts,
                           user_creatable_add_opts_foreach,
-                          NULL, &local_err)) {
-        error_report_err(local_err);
+                          NULL, NULL)) {
         return 1;
     }
 
@@ -1092,7 +1088,8 @@ static int check_empty_sectors(BlockBackend *blk, int64_t sect_num,
                                uint8_t *buffer, bool quiet)
 {
     int pnum, ret = 0;
-    ret = blk_read(blk, sect_num, buffer, sect_count);
+    ret = blk_pread(blk, sect_num << BDRV_SECTOR_BITS, buffer,
+                    sect_count << BDRV_SECTOR_BITS);
     if (ret < 0) {
         error_report("Error while reading offset %" PRId64 " of %s: %s",
                      sectors_to_bytes(sect_num), filename, strerror(-ret));
@@ -1133,7 +1130,6 @@ static int img_compare(int argc, char **argv)
     int64_t nb_sectors;
     int c, pnum;
     uint64_t progress_base;
-    Error *local_err = NULL;
     bool image_opts = false;
 
     cache = BDRV_DEFAULT_CACHE;
@@ -1201,8 +1197,7 @@ static int img_compare(int argc, char **argv)
 
     if (qemu_opts_foreach(&qemu_object_opts,
                           user_creatable_add_opts_foreach,
-                          NULL, &local_err)) {
-        error_report_err(local_err);
+                          NULL, NULL)) {
         ret = 2;
         goto out4;
     }
@@ -1307,7 +1302,8 @@ static int img_compare(int argc, char **argv)
             nb_sectors = MIN(pnum1, pnum2);
         } else if (allocated1 == allocated2) {
             if (allocated1) {
-                ret = blk_read(blk1, sector_num, buf1, nb_sectors);
+                ret = blk_pread(blk1, sector_num << BDRV_SECTOR_BITS, buf1,
+                                nb_sectors << BDRV_SECTOR_BITS);
                 if (ret < 0) {
                     error_report("Error while reading offset %" PRId64 " of %s:"
                                  " %s", sectors_to_bytes(sector_num), filename1,
@@ -1315,7 +1311,8 @@ static int img_compare(int argc, char **argv)
                     ret = 4;
                     goto out;
                 }
-                ret = blk_read(blk2, sector_num, buf2, nb_sectors);
+                ret = blk_pread(blk2, sector_num << BDRV_SECTOR_BITS, buf2,
+                                nb_sectors << BDRV_SECTOR_BITS);
                 if (ret < 0) {
                     error_report("Error while reading offset %" PRId64
                                  " of %s: %s", sectors_to_bytes(sector_num),
@@ -1478,10 +1475,21 @@ static int convert_iteration_sectors(ImgConvertState *s, int64_t sector_num)
         } else if (!s->target_has_backing) {
             /* Without a target backing file we must copy over the contents of
              * the backing file as well. */
-            /* TODO Check block status of the backing file chain to avoid
+            /* Check block status of the backing file chain to avoid
              * needlessly reading zeroes and limiting the iteration to the
              * buffer size */
-            s->status = BLK_DATA;
+            ret = bdrv_get_block_status_above(blk_bs(s->src[s->src_cur]), NULL,
+                                              sector_num - s->src_cur_offset,
+                                              n, &n, &file);
+            if (ret < 0) {
+                return ret;
+            }
+
+            if (ret & BDRV_BLOCK_ZERO) {
+                s->status = BLK_ZERO;
+            } else {
+                s->status = BLK_DATA;
+            }
         } else {
             s->status = BLK_BACKING_FILE;
         }
@@ -1528,7 +1536,9 @@ static int convert_read(ImgConvertState *s, int64_t sector_num, int nb_sectors,
         bs_sectors = s->src_sectors[s->src_cur];
 
         n = MIN(nb_sectors, bs_sectors - (sector_num - s->src_cur_offset));
-        ret = blk_read(blk, sector_num - s->src_cur_offset, buf, n);
+        ret = blk_pread(blk,
+                        (sector_num - s->src_cur_offset) << BDRV_SECTOR_BITS,
+                        buf, n << BDRV_SECTOR_BITS);
         if (ret < 0) {
             return ret;
         }
@@ -1583,7 +1593,8 @@ static int convert_write(ImgConvertState *s, int64_t sector_num, int nb_sectors,
             if (!s->min_sparse ||
                 is_allocated_sectors_min(buf, n, &n, s->min_sparse))
             {
-                ret = blk_write(s->target, sector_num, buf, n);
+                ret = blk_pwrite(s->target, sector_num << BDRV_SECTOR_BITS,
+                                 buf, n << BDRV_SECTOR_BITS, 0);
                 if (ret < 0) {
                     return ret;
                 }
@@ -1595,7 +1606,8 @@ static int convert_write(ImgConvertState *s, int64_t sector_num, int nb_sectors,
             if (s->has_zero_init) {
                 break;
             }
-            ret = blk_write_zeroes(s->target, sector_num, n, 0);
+            ret = blk_write_zeroes(s->target, sector_num << BDRV_SECTOR_BITS,
+                                   n << BDRV_SECTOR_BITS, 0);
             if (ret < 0) {
                 return ret;
             }
@@ -1864,8 +1876,7 @@ static int img_convert(int argc, char **argv)
 
     if (qemu_opts_foreach(&qemu_object_opts,
                           user_creatable_add_opts_foreach,
-                          NULL, &local_err)) {
-        error_report_err(local_err);
+                          NULL, NULL)) {
         goto fail_getopt;
     }
 
@@ -2299,7 +2310,6 @@ static int img_info(int argc, char **argv)
     bool chain = false;
     const char *filename, *fmt, *output;
     ImageInfoList *list;
-    Error *local_err = NULL;
     bool image_opts = false;
 
     fmt = NULL;
@@ -2363,8 +2373,7 @@ static int img_info(int argc, char **argv)
 
     if (qemu_opts_foreach(&qemu_object_opts,
                           user_creatable_add_opts_foreach,
-                          NULL, &local_err)) {
-        error_report_err(local_err);
+                          NULL, NULL)) {
         return 1;
     }
 
@@ -2513,7 +2522,6 @@ static int img_map(int argc, char **argv)
     int64_t length;
     MapEntry curr = { .length = 0 }, next;
     int ret = 0;
-    Error *local_err = NULL;
     bool image_opts = false;
 
     fmt = NULL;
@@ -2573,8 +2581,7 @@ static int img_map(int argc, char **argv)
 
     if (qemu_opts_foreach(&qemu_object_opts,
                           user_creatable_add_opts_foreach,
-                          NULL, &local_err)) {
-        error_report_err(local_err);
+                          NULL, NULL)) {
         return 1;
     }
 
@@ -2717,8 +2724,7 @@ static int img_snapshot(int argc, char **argv)
 
     if (qemu_opts_foreach(&qemu_object_opts,
                           user_creatable_add_opts_foreach,
-                          NULL, &err)) {
-        error_report_err(err);
+                          NULL, NULL)) {
         return 1;
     }
 
@@ -2867,8 +2873,7 @@ static int img_rebase(int argc, char **argv)
 
     if (qemu_opts_foreach(&qemu_object_opts,
                           user_creatable_add_opts_foreach,
-                          NULL, &local_err)) {
-        error_report_err(local_err);
+                          NULL, NULL)) {
         return 1;
     }
 
@@ -3036,7 +3041,8 @@ static int img_rebase(int argc, char **argv)
                     n = old_backing_num_sectors - sector;
                 }
 
-                ret = blk_read(blk_old_backing, sector, buf_old, n);
+                ret = blk_pread(blk_old_backing, sector << BDRV_SECTOR_BITS,
+                                buf_old, n << BDRV_SECTOR_BITS);
                 if (ret < 0) {
                     error_report("error while reading from old backing file");
                     goto out;
@@ -3050,7 +3056,8 @@ static int img_rebase(int argc, char **argv)
                     n = new_backing_num_sectors - sector;
                 }
 
-                ret = blk_read(blk_new_backing, sector, buf_new, n);
+                ret = blk_pread(blk_new_backing, sector << BDRV_SECTOR_BITS,
+                                buf_new, n << BDRV_SECTOR_BITS);
                 if (ret < 0) {
                     error_report("error while reading from new backing file");
                     goto out;
@@ -3066,8 +3073,10 @@ static int img_rebase(int argc, char **argv)
                 if (compare_sectors(buf_old + written * 512,
                     buf_new + written * 512, n - written, &pnum))
                 {
-                    ret = blk_write(blk, sector + written,
-                                    buf_old + written * 512, pnum);
+                    ret = blk_pwrite(blk,
+                                     (sector + written) << BDRV_SECTOR_BITS,
+                                     buf_old + written * 512,
+                                     pnum << BDRV_SECTOR_BITS, 0);
                     if (ret < 0) {
                         error_report("Error while writing to COW image: %s",
                             strerror(-ret));
@@ -3133,7 +3142,6 @@ static int img_resize(int argc, char **argv)
     bool quiet = false;
     BlockBackend *blk = NULL;
     QemuOpts *param;
-    Error *local_err = NULL;
 
     static QemuOptsList resize_options = {
         .name = "resize_options",
@@ -3204,8 +3212,7 @@ static int img_resize(int argc, char **argv)
 
     if (qemu_opts_foreach(&qemu_object_opts,
                           user_creatable_add_opts_foreach,
-                          NULL, &local_err)) {
-        error_report_err(local_err);
+                          NULL, NULL)) {
         return 1;
     }
 
@@ -3297,7 +3304,6 @@ static int img_amend(int argc, char **argv)
     bool quiet = false, progress = false;
     BlockBackend *blk = NULL;
     BlockDriverState *bs = NULL;
-    Error *local_err = NULL;
     bool image_opts = false;
 
     cache = BDRV_DEFAULT_CACHE;
@@ -3365,8 +3371,7 @@ static int img_amend(int argc, char **argv)
 
     if (qemu_opts_foreach(&qemu_object_opts,
                           user_creatable_add_opts_foreach,
-                          NULL, &local_err)) {
-        error_report_err(local_err);
+                          NULL, NULL)) {
         ret = -1;
         goto out_no_progress;
     }

@@ -24,7 +24,7 @@
 
 #include "tcg-be-ldst.h"
 
-#ifndef NDEBUG
+#ifdef CONFIG_DEBUG_TCG
 static const char * const tcg_target_reg_names[TCG_TARGET_NB_REGS] = {
 #if TCG_TARGET_REG_BITS == 64
     "%rax", "%rcx", "%rdx", "%rbx", "%rsp", "%rbp", "%rsi", "%rdi",
@@ -425,7 +425,7 @@ static void tcg_out_opc(TCGContext *s, int opc, int r, int rm, int x)
     }
     if (opc & P_DATA16) {
         /* We should never be asking for both 16 and 64-bit operation.  */
-        assert((opc & P_REXW) == 0);
+        tcg_debug_assert((opc & P_REXW) == 0);
         tcg_out8(s, 0x66);
     }
     if (opc & P_ADDR32) {
@@ -599,7 +599,7 @@ static void tcg_out_modrm_sib_offset(TCGContext *s, int opc, int r, int rm,
         if (index < 0) {
             index = 4;
         } else {
-            assert(index != TCG_REG_ESP);
+            tcg_debug_assert(index != TCG_REG_ESP);
         }
 
         tcg_out_opc(s, opc, r, rm, index);
@@ -745,14 +745,14 @@ static inline void tcg_out_rolw_8(TCGContext *s, int reg)
 static inline void tcg_out_ext8u(TCGContext *s, int dest, int src)
 {
     /* movzbl */
-    assert(src < 4 || TCG_TARGET_REG_BITS == 64);
+    tcg_debug_assert(src < 4 || TCG_TARGET_REG_BITS == 64);
     tcg_out_modrm(s, OPC_MOVZBL + P_REXB_RM, dest, src);
 }
 
 static void tcg_out_ext8s(TCGContext *s, int dest, int src, int rexw)
 {
     /* movsbl */
-    assert(src < 4 || TCG_TARGET_REG_BITS == 64);
+    tcg_debug_assert(src < 4 || TCG_TARGET_REG_BITS == 64);
     tcg_out_modrm(s, OPC_MOVSBL + P_REXB_RM + rexw, dest, src);
 }
 
@@ -1121,6 +1121,21 @@ static inline void tcg_out_call(TCGContext *s, tcg_insn_unit *dest)
 static void tcg_out_jmp(TCGContext *s, tcg_insn_unit *dest)
 {
     tcg_out_branch(s, 0, dest);
+}
+
+static void tcg_out_nopn(TCGContext *s, int n)
+{
+    int i;
+    /* Emit 1 or 2 operand size prefixes for the standard one byte nop,
+     * "xchg %eax,%eax", forming "xchg %ax,%ax". All cores accept the
+     * duplicate prefix, and all of the interesting recent cores can
+     * decode and discard the duplicates in a single cycle.
+     */
+    tcg_debug_assert(n >= 1);
+    for (i = 1; i < n; ++i) {
+        tcg_out8(s, 0x66);
+    }
+    tcg_out8(s, 0x90);
 }
 
 #if defined(CONFIG_SOFTMMU)
@@ -1775,17 +1790,25 @@ static inline void tcg_out_op(TCGContext *s, TCGOpcode opc,
         tcg_out_jmp(s, tb_ret_addr);
         break;
     case INDEX_op_goto_tb:
-        if (s->tb_jmp_offset) {
+        if (s->tb_jmp_insn_offset) {
             /* direct jump method */
+            int gap;
+            /* jump displacement must be aligned for atomic patching;
+             * see if we need to add extra nops before jump
+             */
+            gap = tcg_pcrel_diff(s, QEMU_ALIGN_PTR_UP(s->code_ptr + 1, 4));
+            if (gap != 1) {
+                tcg_out_nopn(s, gap - 1);
+            }
             tcg_out8(s, OPC_JMP_long); /* jmp im */
-            s->tb_jmp_offset[args[0]] = tcg_current_code_size(s);
+            s->tb_jmp_insn_offset[args[0]] = tcg_current_code_size(s);
             tcg_out32(s, 0);
         } else {
             /* indirect jump method */
             tcg_out_modrm_offset(s, OPC_GRP5, EXT5_JMPN_Ev, -1,
-                                 (intptr_t)(s->tb_next + args[0]));
+                                 (intptr_t)(s->tb_jmp_target_addr + args[0]));
         }
-        s->tb_next_offset[args[0]] = tcg_current_code_size(s);
+        s->tb_jmp_reset_offset[args[0]] = tcg_current_code_size(s);
         break;
     case INDEX_op_br:
         tcg_out_jxx(s, JCC_JMP, arg_label(args[0]), 0);

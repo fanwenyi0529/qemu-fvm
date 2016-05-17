@@ -219,9 +219,11 @@ typedef enum S390Opcode {
     RX_ST       = 0x50,
     RX_STC      = 0x42,
     RX_STH      = 0x40,
+
+    NOP         = 0x0707,
 } S390Opcode;
 
-#ifndef NDEBUG
+#ifdef CONFIG_DEBUG_TCG
 static const char * const tcg_target_reg_names[TCG_TARGET_NB_REGS] = {
     "%r0", "%r1", "%r2", "%r3", "%r4", "%r5", "%r6", "%r7",
     "%r8", "%r9", "%r10" "%r11" "%r12" "%r13" "%r14" "%r15"
@@ -348,15 +350,15 @@ static void patch_reloc(tcg_insn_unit *code_ptr, int type,
                         intptr_t value, intptr_t addend)
 {
     intptr_t pcrel2 = (tcg_insn_unit *)value - (code_ptr - 1);
-    assert(addend == -2);
+    tcg_debug_assert(addend == -2);
 
     switch (type) {
     case R_390_PC16DBL:
-        assert(pcrel2 == (int16_t)pcrel2);
+        tcg_debug_assert(pcrel2 == (int16_t)pcrel2);
         tcg_patch16(code_ptr, pcrel2);
         break;
     case R_390_PC32DBL:
-        assert(pcrel2 == (int32_t)pcrel2);
+        tcg_debug_assert(pcrel2 == (int32_t)pcrel2);
         tcg_patch32(code_ptr, pcrel2);
         break;
     default:
@@ -1715,17 +1717,24 @@ static inline void tcg_out_op(TCGContext *s, TCGOpcode opc,
         break;
 
     case INDEX_op_goto_tb:
-        if (s->tb_jmp_offset) {
+        if (s->tb_jmp_insn_offset) {
+            /* branch displacement must be aligned for atomic patching;
+             * see if we need to add extra nop before branch
+             */
+            if (!QEMU_PTR_IS_ALIGNED(s->code_ptr + 1, 4)) {
+                tcg_out16(s, NOP);
+            }
             tcg_out16(s, RIL_BRCL | (S390_CC_ALWAYS << 4));
-            s->tb_jmp_offset[args[0]] = tcg_current_code_size(s);
+            s->tb_jmp_insn_offset[args[0]] = tcg_current_code_size(s);
             s->code_ptr += 2;
         } else {
-            /* load address stored at s->tb_next + args[0] */
-            tcg_out_ld_abs(s, TCG_TYPE_PTR, TCG_TMP0, s->tb_next + args[0]);
+            /* load address stored at s->tb_jmp_target_addr + args[0] */
+            tcg_out_ld_abs(s, TCG_TYPE_PTR, TCG_TMP0,
+                           s->tb_jmp_target_addr + args[0]);
             /* and go there */
             tcg_out_insn(s, RR, BCR, S390_CC_ALWAYS, TCG_TMP0);
         }
-        s->tb_next_offset[args[0]] = tcg_current_code_size(s);
+        s->tb_jmp_reset_offset[args[0]] = tcg_current_code_size(s);
         break;
 
     OP_32_64(ld8u):
