@@ -495,7 +495,7 @@ static inline void free_aio_req(BDRVSheepdogState *s, AIOReq *aio_req)
 
 static void coroutine_fn sd_finish_aiocb(SheepdogAIOCB *acb)
 {
-    qemu_coroutine_enter(acb->coroutine, NULL);
+    qemu_coroutine_enter(acb->coroutine);
     qemu_aio_unref(acb);
 }
 
@@ -636,7 +636,7 @@ static void restart_co_req(void *opaque)
 {
     Coroutine *co = opaque;
 
-    qemu_coroutine_enter(co, NULL);
+    qemu_coroutine_enter(co);
 }
 
 typedef struct SheepdogReqCo {
@@ -726,8 +726,8 @@ static int do_req(int sockfd, AioContext *aio_context, SheepdogReq *hdr,
     if (qemu_in_coroutine()) {
         do_co_req(&srco);
     } else {
-        co = qemu_coroutine_create(do_co_req);
-        qemu_coroutine_enter(co, &srco);
+        co = qemu_coroutine_create(do_co_req, &srco);
+        qemu_coroutine_enter(co);
         while (!srco.finished) {
             aio_poll(aio_context, true);
         }
@@ -925,17 +925,17 @@ static void co_read_response(void *opaque)
     BDRVSheepdogState *s = opaque;
 
     if (!s->co_recv) {
-        s->co_recv = qemu_coroutine_create(aio_read_response);
+        s->co_recv = qemu_coroutine_create(aio_read_response, opaque);
     }
 
-    qemu_coroutine_enter(s->co_recv, opaque);
+    qemu_coroutine_enter(s->co_recv);
 }
 
 static void co_write_request(void *opaque)
 {
     BDRVSheepdogState *s = opaque;
 
-    qemu_coroutine_enter(s->co_send, NULL);
+    qemu_coroutine_enter(s->co_send);
 }
 
 /*
@@ -2784,12 +2784,19 @@ static int sd_save_vmstate(BlockDriverState *bs, QEMUIOVector *qiov,
     return ret;
 }
 
-static int sd_load_vmstate(BlockDriverState *bs, uint8_t *data,
-                           int64_t pos, int size)
+static int sd_load_vmstate(BlockDriverState *bs, QEMUIOVector *qiov,
+                           int64_t pos)
 {
     BDRVSheepdogState *s = bs->opaque;
+    void *buf;
+    int ret;
 
-    return do_load_save_vmstate(s, data, pos, size, 1);
+    buf = qemu_blockalign(bs, qiov->size);
+    ret = do_load_save_vmstate(s, buf, pos, qiov->size, 1);
+    qemu_iovec_from_buf(qiov, 0, buf, qiov->size);
+    qemu_vfree(buf);
+
+    return ret;
 }
 
 

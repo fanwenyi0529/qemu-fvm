@@ -587,6 +587,33 @@ Example:
 EQMP
 
     {
+        .name       = "xen-load-devices-state",
+        .args_type  = "filename:F",
+        .mhandler.cmd_new = qmp_marshal_xen_load_devices_state,
+    },
+
+SQMP
+xen-load-devices-state
+----------------------
+
+Load the state of all devices from file. The RAM and the block devices
+of the VM are not loaded by this command.
+
+Arguments:
+
+- "filename": the file to load the state of the devices from as binary
+data. See xen-save-devices-state.txt for a description of the binary
+format.
+
+Example:
+
+-> { "execute": "xen-load-devices-state",
+     "arguments": { "filename": "/tmp/resume" } }
+<- { "return": {} }
+
+EQMP
+
+    {
         .name       = "xen-set-global-dirty-log",
         .args_type  = "enable:b",
         .mhandler.cmd_new = qmp_marshal_xen_set_global_dirty_log,
@@ -1079,7 +1106,7 @@ EQMP
 
     {
         .name       = "block-stream",
-        .args_type  = "device:B,base:s?,speed:o?,backing-file:s?,on-error:s?",
+        .args_type  = "job-id:s?,device:B,base:s?,speed:o?,backing-file:s?,on-error:s?",
         .mhandler.cmd_new = qmp_marshal_block_stream,
     },
 
@@ -1091,6 +1118,8 @@ Copy data from a backing file into a block device.
 
 Arguments:
 
+- "job-id": Identifier for the newly-created block job. If omitted,
+            the device name will be used. (json-string, optional)
 - "device": The device's ID, must be unique (json-string)
 - "base": The file name of the backing image above which copying starts
           (json-string, optional)
@@ -1122,7 +1151,7 @@ EQMP
 
     {
         .name       = "block-commit",
-        .args_type  = "device:B,base:s?,top:s?,backing-file:s?,speed:o?",
+        .args_type  = "job-id:s?,device:B,base:s?,top:s?,backing-file:s?,speed:o?",
         .mhandler.cmd_new = qmp_marshal_block_commit,
     },
 
@@ -1135,6 +1164,8 @@ data between 'top' and 'base' into 'base'.
 
 Arguments:
 
+- "job-id": Identifier for the newly-created block job. If omitted,
+            the device name will be used. (json-string, optional)
 - "device": The device's ID, must be unique (json-string)
 - "base": The file name of the backing image to write data into.
           If not specified, this is the deepest backing image
@@ -1185,8 +1216,8 @@ EQMP
 
     {
         .name       = "drive-backup",
-        .args_type  = "sync:s,device:B,target:s,speed:i?,mode:s?,format:s?,"
-                      "bitmap:s?,on-source-error:s?,on-target-error:s?",
+        .args_type  = "job-id:s?,sync:s,device:B,target:s,speed:i?,mode:s?,"
+                      "format:s?,bitmap:s?,on-source-error:s?,on-target-error:s?",
         .mhandler.cmd_new = qmp_marshal_drive_backup,
     },
 
@@ -1202,6 +1233,8 @@ block-job-cancel command.
 
 Arguments:
 
+- "job-id": Identifier for the newly-created block job. If omitted,
+            the device name will be used. (json-string, optional)
 - "device": the name of the device which should be copied.
             (json-string)
 - "target": the target of the new image. If the file exists, or if it is a
@@ -1239,7 +1272,7 @@ EQMP
 
     {
         .name       = "blockdev-backup",
-        .args_type  = "sync:s,device:B,target:B,speed:i?,"
+        .args_type  = "job-id:s?,sync:s,device:B,target:B,speed:i?,"
                       "on-source-error:s?,on-target-error:s?",
         .mhandler.cmd_new = qmp_marshal_blockdev_backup,
     },
@@ -1253,6 +1286,8 @@ as backup target.
 
 Arguments:
 
+- "job-id": Identifier for the newly-created block job. If omitted,
+            the device name will be used. (json-string, optional)
 - "device": the name of the device which should be copied.
             (json-string)
 - "target": the name of the backup target device. (json-string)
@@ -1629,8 +1664,8 @@ EQMP
 
     {
         .name       = "drive-mirror",
-        .args_type  = "sync:s,device:B,target:s,speed:i?,mode:s?,format:s?,"
-                      "node-name:s?,replaces:s?,"
+        .args_type  = "job-id:s?,sync:s,device:B,target:s,speed:i?,mode:s?,"
+                      "format:s?,node-name:s?,replaces:s?,"
                       "on-source-error:s?,on-target-error:s?,"
                       "unmap:b?,"
                       "granularity:i?,buf-size:i?",
@@ -1650,6 +1685,8 @@ of the source.
 
 Arguments:
 
+- "job-id": Identifier for the newly-created block job. If omitted,
+            the device name will be used. (json-string, optional)
 - "device": device name to operate on (json-string)
 - "target": name of new image file (json-string)
 - "format": format of new image (json-string, optional)
@@ -1693,7 +1730,7 @@ EQMP
 
     {
         .name       = "blockdev-mirror",
-        .args_type  = "sync:s,device:B,target:B,replaces:s?,speed:i?,"
+        .args_type  = "job-id:s?,sync:s,device:B,target:B,replaces:s?,speed:i?,"
                       "on-source-error:s?,on-target-error:s?,"
                       "granularity:i?,buf-size:i?",
         .mhandler.cmd_new = qmp_marshal_blockdev_mirror,
@@ -1708,6 +1745,8 @@ specifies the target of mirror operation.
 
 Arguments:
 
+- "job-id": Identifier for the newly-created block job. If omitted,
+            the device name will be used. (json-string, optional)
 - "device": device name to operate on (json-string)
 - "target": device name to mirror to (json-string)
 - "replaces": the block driver node name to replace when finished
@@ -3747,10 +3786,10 @@ Set migration parameters
 - "compress-level": set compression level during migration (json-int)
 - "compress-threads": set compression thread count for migration (json-int)
 - "decompress-threads": set decompression thread count for migration (json-int)
-- "x-cpu-throttle-initial": set initial percentage of time guest cpus are
-                           throttled for auto-converge (json-int)
-- "x-cpu-throttle-increment": set throttle increasing percentage for
-                             auto-converge (json-int)
+- "cpu-throttle-initial": set initial percentage of time guest cpus are
+                          throttled for auto-converge (json-int)
+- "cpu-throttle-increment": set throttle increasing percentage for
+                            auto-converge (json-int)
 
 Arguments:
 
@@ -3764,7 +3803,7 @@ EQMP
     {
         .name       = "migrate-set-parameters",
         .args_type  =
-            "compress-level:i?,compress-threads:i?,decompress-threads:i?,x-cpu-throttle-initial:i?,x-cpu-throttle-increment:i?",
+            "compress-level:i?,compress-threads:i?,decompress-threads:i?,cpu-throttle-initial:i?,cpu-throttle-increment:i?",
         .mhandler.cmd_new = qmp_marshal_migrate_set_parameters,
     },
 SQMP
@@ -3777,10 +3816,10 @@ Query current migration parameters
          - "compress-level" : compression level value (json-int)
          - "compress-threads" : compression thread count value (json-int)
          - "decompress-threads" : decompression thread count value (json-int)
-         - "x-cpu-throttle-initial" : initial percentage of time guest cpus are
-                                      throttled (json-int)
-         - "x-cpu-throttle-increment" : throttle increasing percentage for
-                                        auto-converge (json-int)
+         - "cpu-throttle-initial" : initial percentage of time guest cpus are
+                                    throttled (json-int)
+         - "cpu-throttle-increment" : throttle increasing percentage for
+                                      auto-converge (json-int)
 
 Arguments:
 
@@ -3790,10 +3829,10 @@ Example:
 <- {
       "return": {
          "decompress-threads": 2,
-         "x-cpu-throttle-increment": 10,
+         "cpu-throttle-increment": 10,
          "compress-threads": 8,
          "compress-level": 1,
-         "x-cpu-throttle-initial": 20
+         "cpu-throttle-initial": 20
       }
    }
 
@@ -4933,3 +4972,26 @@ Example:
                 { "version": 3, "emulated": false, "kernel": true } ] }
 
 EQMP
+
+    {
+        .name       = "query-hotpluggable-cpus",
+        .args_type  = "",
+        .mhandler.cmd_new = qmp_marshal_query_hotpluggable_cpus,
+    },
+
+SQMP
+Show existing/possible CPUs
+---------------------------
+
+Arguments: None.
+
+Example for pseries machine type started with
+-smp 2,cores=2,maxcpus=4 -cpu POWER8:
+
+-> { "execute": "query-hotpluggable-cpus" }
+<- {"return": [
+     { "props": { "core-id": 8 }, "type": "POWER8-spapr-cpu-core",
+       "vcpus-count": 1 },
+     { "props": { "core-id": 0 }, "type": "POWER8-spapr-cpu-core",
+       "vcpus-count": 1, "qom-path": "/machine/unattached/device[0]"}
+   ]}'

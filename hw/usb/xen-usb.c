@@ -19,13 +19,10 @@
  *  GNU GPL, version 2 or (at your option) any later version.
  */
 
-#include <libusb.h>
-#include <stdio.h>
-#include <sys/types.h>
-#include <sys/mman.h>
-#include <sys/time.h>
-
 #include "qemu/osdep.h"
+#include <libusb.h>
+#include <sys/user.h>
+
 #include "qemu-common.h"
 #include "qemu/config-file.h"
 #include "hw/sysbus.h"
@@ -35,7 +32,6 @@
 #include "qapi/qmp/qbool.h"
 #include "qapi/qmp/qint.h"
 #include "qapi/qmp/qstring.h"
-#include "sys/user.h"
 
 #include <xen/io/ring.h>
 #include <xen/io/usbif.h>
@@ -257,7 +253,8 @@ static int usbback_init_packet(struct usbback_req *usbback_req)
 
     case USBIF_PIPE_TYPE_CTRL:
         packet->parameter = *(uint64_t *)usbback_req->req.u.ctrl;
-        TR_REQ(xendev, "ctrl parameter: %lx, buflen: %x\n", packet->parameter,
+        TR_REQ(xendev, "ctrl parameter: %"PRIx64", buflen: %x\n",
+               packet->parameter,
                usbback_req->req.buffer_length);
         break;
 

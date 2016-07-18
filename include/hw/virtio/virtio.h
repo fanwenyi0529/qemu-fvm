@@ -11,8 +11,8 @@
  *
  */
 
-#ifndef _QEMU_VIRTIO_H
-#define _QEMU_VIRTIO_H
+#ifndef QEMU_VIRTIO_H
+#define QEMU_VIRTIO_H
 
 #include "hw/hw.h"
 #include "net/net.h"
@@ -243,7 +243,6 @@ void virtio_queue_set_last_avail_idx(VirtIODevice *vdev, int n, uint16_t idx);
 void virtio_queue_invalidate_signalled_used(VirtIODevice *vdev, int n);
 VirtQueue *virtio_get_queue(VirtIODevice *vdev, int n);
 uint16_t virtio_get_queue_index(VirtQueue *vq);
-int virtio_queue_get_id(VirtQueue *vq);
 EventNotifier *virtio_queue_get_guest_notifier(VirtQueue *vq);
 void virtio_queue_set_guest_notifier_fd_handler(VirtQueue *vq, bool assign,
                                                 bool with_irqfd);

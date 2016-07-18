@@ -16,8 +16,9 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, see <http://www.gnu.org/licenses/>.
  */
-#ifndef CPU_I386_H
-#define CPU_I386_H
+
+#ifndef I386_CPU_H
+#define I386_CPU_H
 
 #include "qemu-common.h"
 #include "cpu-qom.h"
@@ -292,6 +293,7 @@
 
 #define MCG_CTL_P       (1ULL<<8)   /* MCG_CAP register available */
 #define MCG_SER_P       (1ULL<<24) /* MCA recovery/new status bits */
+#define MCG_LMCE_P      (1ULL<<27) /* Local Machine Check Supported */
 
 #define MCE_CAP_DEF     (MCG_CTL_P|MCG_SER_P)
 #define MCE_BANKS_DEF   10
@@ -301,6 +303,9 @@
 #define MCG_STATUS_RIPV (1ULL<<0)   /* restart ip valid */
 #define MCG_STATUS_EIPV (1ULL<<1)   /* ip points to correct instruction */
 #define MCG_STATUS_MCIP (1ULL<<2)   /* machine check in progress */
+#define MCG_STATUS_LMCE (1ULL<<3)   /* Local MCE signaled */
+
+#define MCG_EXT_CTL_LMCE_EN (1ULL<<0) /* Local MCE enabled */
 
 #define MCI_STATUS_VAL   (1ULL<<63)  /* valid error */
 #define MCI_STATUS_OVER  (1ULL<<62)  /* previous errors lost */
@@ -328,6 +333,10 @@
 #define MSR_TSC_ADJUST                  0x0000003b
 #define MSR_IA32_TSCDEADLINE            0x6e0
 
+#define FEATURE_CONTROL_LOCKED                    (1<<0)
+#define FEATURE_CONTROL_VMXON_ENABLED_OUTSIDE_SMX (1<<2)
+#define FEATURE_CONTROL_LMCE                      (1<<20)
+
 #define MSR_P6_PERFCTR0                 0xc1
 
 #define MSR_IA32_SMBASE                 0x9e
@@ -343,6 +352,7 @@
 #define MSR_MCG_CAP                     0x179
 #define MSR_MCG_STATUS                  0x17a
 #define MSR_MCG_CTL                     0x17b
+#define MSR_MCG_EXT_CTL                 0x4d0
 
 #define MSR_P6_EVNTSEL0                 0x186
 
@@ -440,6 +450,9 @@ typedef enum FeatureWord {
     FEAT_8000_0007_EDX, /* CPUID[8000_0007].EDX */
     FEAT_C000_0001_EDX, /* CPUID[C000_0001].EDX */
     FEAT_KVM,           /* CPUID[4000_0001].EAX (KVM_CPUID_FEATURES) */
+    FEAT_HYPERV_EAX,    /* CPUID[4000_0003].EAX */
+    FEAT_HYPERV_EBX,    /* CPUID[4000_0003].EBX */
+    FEAT_HYPERV_EDX,    /* CPUID[4000_0003].EDX */
     FEAT_SVM,           /* CPUID[8000_000A].EDX */
     FEAT_XSAVE,         /* CPUID[EAX=0xd,ECX=1].EAX */
     FEAT_6_EAX,         /* CPUID[6].EAX */
@@ -635,6 +648,11 @@ typedef uint32_t FeatureWordArray[FEATURE_WORDS];
 
 #define CPUID_MWAIT_IBE     (1U << 1) /* Interrupts can exit capability */
 #define CPUID_MWAIT_EMX     (1U << 0) /* enumeration supported */
+
+/* CPUID[0xB].ECX level types */
+#define CPUID_TOPOLOGY_LEVEL_INVALID  (0U << 8)
+#define CPUID_TOPOLOGY_LEVEL_SMT      (1U << 8)
+#define CPUID_TOPOLOGY_LEVEL_CORE     (2U << 8)
 
 #ifndef HYPERV_SPINLOCK_NEVER_RETRY
 #define HYPERV_SPINLOCK_NEVER_RETRY             0xFFFFFFFF
@@ -832,6 +850,101 @@ typedef struct {
 
 #define NB_OPMASK_REGS 8
 
+typedef union X86LegacyXSaveArea {
+    struct {
+        uint16_t fcw;
+        uint16_t fsw;
+        uint8_t ftw;
+        uint8_t reserved;
+        uint16_t fpop;
+        uint64_t fpip;
+        uint64_t fpdp;
+        uint32_t mxcsr;
+        uint32_t mxcsr_mask;
+        FPReg fpregs[8];
+        uint8_t xmm_regs[16][16];
+    };
+    uint8_t data[512];
+} X86LegacyXSaveArea;
+
+typedef struct X86XSaveHeader {
+    uint64_t xstate_bv;
+    uint64_t xcomp_bv;
+    uint8_t reserved[48];
+} X86XSaveHeader;
+
+/* Ext. save area 2: AVX State */
+typedef struct XSaveAVX {
+    uint8_t ymmh[16][16];
+} XSaveAVX;
+
+/* Ext. save area 3: BNDREG */
+typedef struct XSaveBNDREG {
+    BNDReg bnd_regs[4];
+} XSaveBNDREG;
+
+/* Ext. save area 4: BNDCSR */
+typedef union XSaveBNDCSR {
+    BNDCSReg bndcsr;
+    uint8_t data[64];
+} XSaveBNDCSR;
+
+/* Ext. save area 5: Opmask */
+typedef struct XSaveOpmask {
+    uint64_t opmask_regs[NB_OPMASK_REGS];
+} XSaveOpmask;
+
+/* Ext. save area 6: ZMM_Hi256 */
+typedef struct XSaveZMM_Hi256 {
+    uint8_t zmm_hi256[16][32];
+} XSaveZMM_Hi256;
+
+/* Ext. save area 7: Hi16_ZMM */
+typedef struct XSaveHi16_ZMM {
+    uint8_t hi16_zmm[16][64];
+} XSaveHi16_ZMM;
+
+/* Ext. save area 9: PKRU state */
+typedef struct XSavePKRU {
+    uint32_t pkru;
+    uint32_t padding;
+} XSavePKRU;
+
+typedef struct X86XSaveArea {
+    X86LegacyXSaveArea legacy;
+    X86XSaveHeader header;
+
+    /* Extended save areas: */
+
+    /* AVX State: */
+    XSaveAVX avx_state;
+    uint8_t padding[960 - 576 - sizeof(XSaveAVX)];
+    /* MPX State: */
+    XSaveBNDREG bndreg_state;
+    XSaveBNDCSR bndcsr_state;
+    /* AVX-512 State: */
+    XSaveOpmask opmask_state;
+    XSaveZMM_Hi256 zmm_hi256_state;
+    XSaveHi16_ZMM hi16_zmm_state;
+    /* PKRU State: */
+    XSavePKRU pkru_state;
+} X86XSaveArea;
+
+QEMU_BUILD_BUG_ON(offsetof(X86XSaveArea, avx_state) != 0x240);
+QEMU_BUILD_BUG_ON(sizeof(XSaveAVX) != 0x100);
+QEMU_BUILD_BUG_ON(offsetof(X86XSaveArea, bndreg_state) != 0x3c0);
+QEMU_BUILD_BUG_ON(sizeof(XSaveBNDREG) != 0x40);
+QEMU_BUILD_BUG_ON(offsetof(X86XSaveArea, bndcsr_state) != 0x400);
+QEMU_BUILD_BUG_ON(sizeof(XSaveBNDCSR) != 0x40);
+QEMU_BUILD_BUG_ON(offsetof(X86XSaveArea, opmask_state) != 0x440);
+QEMU_BUILD_BUG_ON(sizeof(XSaveOpmask) != 0x40);
+QEMU_BUILD_BUG_ON(offsetof(X86XSaveArea, zmm_hi256_state) != 0x480);
+QEMU_BUILD_BUG_ON(sizeof(XSaveZMM_Hi256) != 0x200);
+QEMU_BUILD_BUG_ON(offsetof(X86XSaveArea, hi16_zmm_state) != 0x680);
+QEMU_BUILD_BUG_ON(sizeof(XSaveHi16_ZMM) != 0x400);
+QEMU_BUILD_BUG_ON(offsetof(X86XSaveArea, pkru_state) != 0xA80);
+QEMU_BUILD_BUG_ON(sizeof(XSavePKRU) != 0x8);
+
 typedef enum TPRAccess {
     TPR_ACCESS_READ,
     TPR_ACCESS_WRITE,
@@ -1013,6 +1126,7 @@ typedef struct CPUX86State {
 
     uint64_t mcg_cap;
     uint64_t mcg_ctl;
+    uint64_t mcg_ext_ctl;
     uint64_t mce_banks[MCE_BANKS_DEF*4];
 
     uint64_t tsc_aux;
@@ -1030,6 +1144,8 @@ typedef struct CPUX86State {
 
     TPRAccess tpr_access_type;
 } CPUX86State;
+
+struct kvm_msrs;
 
 /**
  * X86CPU:
@@ -1078,11 +1194,22 @@ struct X86CPU {
      */
     bool enable_pmu;
 
+    /* LMCE support can be enabled/disabled via cpu option 'lmce=on/off'. It is
+     * disabled by default to avoid breaking migration between QEMU with
+     * different LMCE configurations.
+     */
+    bool enable_lmce;
+
+    /* Compatibility bits for old machine types: */
+    bool enable_cpuid_0xb;
+
     /* in order to simplify APIC support, we leave this pointer to the
        user */
     struct DeviceState *apic_state;
     struct MemoryRegion *cpu_as_root, *cpu_as_mem, *smram;
     Notifier machine_done;
+
+    struct kvm_msrs *kvm_msr_buf;
 };
 
 static inline X86CPU *x86_env_get_cpu(CPUX86State *env)
@@ -1129,10 +1256,7 @@ void x86_cpu_exec_enter(CPUState *cpu);
 void x86_cpu_exec_exit(CPUState *cpu);
 
 X86CPU *cpu_x86_init(const char *cpu_model);
-X86CPU *cpu_x86_create(const char *cpu_model, Error **errp);
-int cpu_x86_exec(CPUState *cpu);
 void x86_cpu_list(FILE *f, fprintf_function cpu_fprintf);
-void x86_cpudef_setup(void);
 int cpu_x86_support_mca_broadcast(CPUX86State *env);
 
 int cpu_get_pic_interrupt(CPUX86State *s);
@@ -1307,10 +1431,8 @@ uint64_t cpu_get_tsc(CPUX86State *env);
 
 #define cpu_init(cpu_model) CPU(cpu_x86_init(cpu_model))
 
-#define cpu_exec cpu_x86_exec
 #define cpu_signal_handler cpu_x86_signal_handler
 #define cpu_list x86_cpu_list
-#define cpudef_setup x86_cpudef_setup
 
 /* MMU modes definitions */
 #define MMU_MODE0_SUFFIX _ksmap
@@ -1488,4 +1610,4 @@ void x86_cpu_dump_local_apic_state(CPUState *cs, FILE *f,
 /* cpu.c */
 bool cpu_is_bsp(X86CPU *cpu);
 
-#endif /* CPU_I386_H */
+#endif /* I386_CPU_H */

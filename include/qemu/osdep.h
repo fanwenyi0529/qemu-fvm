@@ -151,7 +151,8 @@ extern int daemon(int, int);
 /* Minimum function that returns zero only iff both values are zero.
  * Intended for use with unsigned values only. */
 #ifndef MIN_NON_ZERO
-#define MIN_NON_ZERO(a, b) (((a) != 0 && (a) < (b)) ? (a) : (b))
+#define MIN_NON_ZERO(a, b) ((a) == 0 ? (b) : \
+                                ((b) == 0 ? (a) : (MIN(a, b))))
 #endif
 
 /* Round number down to multiple */
@@ -196,8 +197,6 @@ void qemu_anon_ram_free(void *ptr, size_t size);
 #define QEMU_MADV_INVALID -1
 
 #if defined(CONFIG_MADVISE)
-
-#include <sys/mman.h>
 
 #define QEMU_MADV_WILLNEED  MADV_WILLNEED
 #define QEMU_MADV_DONTNEED  MADV_DONTNEED
@@ -280,6 +279,9 @@ int qemu_madvise(void *addr, size_t len, int advice);
 
 int qemu_open(const char *name, int flags, ...);
 int qemu_close(int fd);
+#ifndef _WIN32
+int qemu_dup(int fd);
+#endif
 
 #if defined(__HAIKU__) && defined(__i386__)
 #define FMT_pid "%ld"
@@ -326,6 +328,15 @@ static inline void qemu_timersub(const struct timeval *val1,
 #endif
 
 void qemu_set_cloexec(int fd);
+
+/* Starting on QEMU 2.5, qemu_hw_version() returns "2.5+" by default
+ * instead of QEMU_VERSION, so setting hw_version on MachineClass
+ * is no longer mandatory.
+ *
+ * Do NOT change this string, or it will break compatibility on all
+ * machine classes that don't set hw_version.
+ */
+#define QEMU_HW_VERSION "2.5+"
 
 /* QEMU "hardware version" setting. Used to replace code that exposed
  * QEMU_VERSION to guests in the past and need to keep compatibility.

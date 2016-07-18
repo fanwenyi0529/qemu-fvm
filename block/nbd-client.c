@@ -38,7 +38,7 @@ static void nbd_recv_coroutines_enter_all(NbdClientSession *s)
 
     for (i = 0; i < MAX_NBD_REQUESTS; i++) {
         if (s->recv_coroutine[i]) {
-            qemu_coroutine_enter(s->recv_coroutine[i], NULL);
+            qemu_coroutine_enter(s->recv_coroutine[i]);
         }
     }
 }
@@ -99,7 +99,7 @@ static void nbd_reply_ready(void *opaque)
     }
 
     if (s->recv_coroutine[i]) {
-        qemu_coroutine_enter(s->recv_coroutine[i], NULL);
+        qemu_coroutine_enter(s->recv_coroutine[i]);
         return;
     }
 
@@ -111,7 +111,7 @@ static void nbd_restart_write(void *opaque)
 {
     BlockDriverState *bs = opaque;
 
-    qemu_coroutine_enter(nbd_get_client_session(bs)->send_coroutine, NULL);
+    qemu_coroutine_enter(nbd_get_client_session(bs)->send_coroutine);
 }
 
 static int nbd_co_send_request(BlockDriverState *bs,
@@ -268,10 +268,6 @@ static int nbd_co_writev_1(BlockDriverState *bs, int64_t sector_num,
     nbd_coroutine_end(client, &request);
     return -reply.error;
 }
-
-/* qemu-nbd has a limit of slightly less than 1M per request.  Try to
- * remain aligned to 4K. */
-#define NBD_MAX_SECTORS 2040
 
 int nbd_client_co_readv(BlockDriverState *bs, int64_t sector_num,
                         int nb_sectors, QEMUIOVector *qiov)

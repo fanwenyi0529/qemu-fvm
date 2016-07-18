@@ -19,8 +19,9 @@
  * You should have received a copy of the GNU (Lesser) General Public
  * License along with this library; if not, see <http://www.gnu.org/licenses/>.
  */
-#ifndef CPU_S390X_H
-#define CPU_S390X_H
+
+#ifndef S390X_CPU_H
+#define S390X_CPU_H
 
 #include "qemu-common.h"
 #include "cpu-qom.h"
@@ -219,7 +220,7 @@ int s390_cpu_gdb_write_register(CPUState *cpu, uint8_t *buf, int reg);
 void s390_cpu_gdb_init(CPUState *cs);
 void s390x_cpu_debug_excp_handler(CPUState *cs);
 
-#include <sysemu/kvm.h>
+#include "sysemu/kvm.h"
 
 /* distinguish between 24 bit and 31 bit addressing */
 #define HIGH_ORDER_BIT 0x80000000
@@ -463,7 +464,6 @@ S390CPU *cpu_s390x_init(const char *cpu_model);
 S390CPU *s390x_new_cpu(const char *cpu_model, int64_t id, Error **errp);
 S390CPU *cpu_s390x_create(const char *cpu_model, Error **errp);
 void s390x_translate_init(void);
-int cpu_s390x_exec(CPUState *cpu);
 
 /* you can call this signal handler from your SIGBUS and SIGSEGV
    signal handlers to inform the virtual CPU of exceptions. non zero
@@ -627,7 +627,6 @@ void cpu_unlock(void);
 extern void subsystem_reset(void);
 
 #define cpu_init(model) CPU(cpu_s390x_init(model))
-#define cpu_exec cpu_s390x_exec
 #define cpu_signal_handler cpu_s390x_signal_handler
 
 void s390_cpu_list(FILE *f, fprintf_function cpu_fprintf);

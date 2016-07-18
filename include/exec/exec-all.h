@@ -17,8 +17,8 @@
  * License along with this library; if not, see <http://www.gnu.org/licenses/>.
  */
 
-#ifndef _EXEC_ALL_H_
-#define _EXEC_ALL_H_
+#ifndef EXEC_ALL_H
+#define EXEC_ALL_H
 
 #include "qemu-common.h"
 #include "exec/tb-context.h"
@@ -53,7 +53,7 @@ const char *qemu_sprint_backtrace(char *buffer, size_t length);
 void cpu_gen_init(void);
 bool cpu_restore_state(CPUState *cpu, uintptr_t searched_pc);
 
-void QEMU_NORETURN cpu_resume_from_signal(CPUState *cpu, void *puc);
+void QEMU_NORETURN cpu_loop_exit_noexc(CPUState *cpu);
 void QEMU_NORETURN cpu_io_recompile(CPUState *cpu, uintptr_t retaddr);
 TranslationBlock *tb_gen_code(CPUState *cpu,
                               target_ulong pc, target_ulong cs_base,
@@ -218,8 +218,6 @@ struct TranslationBlock {
 
     void *tc_ptr;    /* pointer to the translated code */
     uint8_t *tc_search;  /* pointer to search data */
-    /* next matching tb for physical address. */
-    struct TranslationBlock *phys_hash_next;
     /* original tb when cflags has CF_NOCACHE */
     struct TranslationBlock *orig_tb;
     /* first and second physical page containing code. The lower bit
@@ -366,8 +364,8 @@ extern uintptr_t tci_tb_ptr;
 struct MemoryRegion *iotlb_to_region(CPUState *cpu,
                                      hwaddr index, MemTxAttrs attrs);
 
-void tlb_fill(CPUState *cpu, target_ulong addr, int is_write, int mmu_idx,
-              uintptr_t retaddr);
+void tlb_fill(CPUState *cpu, target_ulong addr, MMUAccessType access_type,
+              int mmu_idx, uintptr_t retaddr);
 
 #endif
 

@@ -40,6 +40,7 @@ int machine_kvm_shadow_mem(MachineState *machine);
 int machine_phandle_start(MachineState *machine);
 bool machine_dump_guest_core(MachineState *machine);
 bool machine_mem_merge(MachineState *machine);
+void machine_register_compat_props(MachineState *machine);
 
 /**
  * CPUArchId:
@@ -80,6 +81,10 @@ typedef struct {
  * @possible_cpu_arch_ids:
  *    Returns an array of @CPUArchId architecture-dependent CPU IDs
  *    which includes CPU IDs for present and possible to hotplug CPUs.
+ *    Caller is responsible for freeing returned list.
+ * @query_hotpluggable_cpus:
+ *    Returns a @HotpluggableCPUList, which describes CPUs objects which
+ *    could be added with -device/device_add.
  *    Caller is responsible for freeing returned list.
  */
 struct MachineClass {
@@ -124,6 +129,7 @@ struct MachineClass {
                                            DeviceState *dev);
     unsigned (*cpu_index_to_socket_id)(unsigned cpu_index);
     CPUArchIdList *(*possible_cpu_arch_ids)(MachineState *machine);
+    HotpluggableCPUList *(*query_hotpluggable_cpus)(MachineState *machine);
 };
 
 /**

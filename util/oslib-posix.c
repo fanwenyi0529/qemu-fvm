@@ -36,7 +36,6 @@
 #include "trace.h"
 #include "qapi/error.h"
 #include "qemu/sockets.h"
-#include <sys/mman.h>
 #include <libgen.h>
 #include <sys/signal.h>
 #include "qemu/cutils.h"
@@ -49,7 +48,7 @@
 #include <sys/sysctl.h>
 #endif
 
-#include <qemu/mmap-alloc.h>
+#include "qemu/mmap-alloc.h"
 
 int qemu_get_thread_id(void)
 {

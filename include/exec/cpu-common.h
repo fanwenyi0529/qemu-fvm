@@ -1,5 +1,5 @@
 #ifndef CPU_COMMON_H
-#define CPU_COMMON_H 1
+#define CPU_COMMON_H
 
 /* CPU interfaces that are target independent.  */
 
@@ -22,12 +22,6 @@ typedef struct CPUListState {
     fprintf_function cpu_fprintf;
     FILE *file;
 } CPUListState;
-
-typedef enum MMUAccessType {
-    MMU_DATA_LOAD  = 0,
-    MMU_DATA_STORE = 1,
-    MMU_INST_FETCH = 2
-} MMUAccessType;
 
 #if !defined(CONFIG_USER_ONLY)
 
@@ -57,10 +51,10 @@ typedef uint32_t CPUReadMemoryFunc(void *opaque, hwaddr addr);
 
 void qemu_ram_remap(ram_addr_t addr, ram_addr_t length);
 /* This should not be used by devices.  */
-MemoryRegion *qemu_ram_addr_from_host(void *ptr, ram_addr_t *ram_addr);
+ram_addr_t qemu_ram_addr_from_host(void *ptr);
 RAMBlock *qemu_ram_block_by_name(const char *name);
 RAMBlock *qemu_ram_block_from_host(void *ptr, bool round_offset,
-                                   ram_addr_t *ram_addr, ram_addr_t *offset);
+                                   ram_addr_t *offset);
 void qemu_ram_set_idstr(RAMBlock *block, const char *name, DeviceState *dev);
 void qemu_ram_unset_idstr(RAMBlock *block);
 const char *qemu_ram_get_idstr(RAMBlock *rb);
@@ -123,4 +117,4 @@ int qemu_ram_foreach_block(RAMBlockIterFunc func, void *opaque);
 
 #endif
 
-#endif /* !CPU_COMMON_H */
+#endif /* CPU_COMMON_H */

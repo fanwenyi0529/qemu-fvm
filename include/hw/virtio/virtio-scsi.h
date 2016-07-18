@@ -11,8 +11,8 @@
  *
  */
 
-#ifndef _QEMU_VIRTIO_SCSI_H
-#define _QEMU_VIRTIO_SCSI_H
+#ifndef QEMU_VIRTIO_SCSI_H
+#define QEMU_VIRTIO_SCSI_H
 
 /* Override CDB/sense data size: they are dynamic (guest controlled) in QEMU */
 #define VIRTIO_SCSI_CDB_SIZE 0
@@ -68,13 +68,6 @@ typedef struct VirtIOSCSICommon {
     VirtQueue **cmd_vqs;
 } VirtIOSCSICommon;
 
-typedef struct VirtIOSCSIBlkChangeNotifier {
-    Notifier n;
-    struct VirtIOSCSI *s;
-    SCSIDevice *sd;
-    QTAILQ_ENTRY(VirtIOSCSIBlkChangeNotifier) next;
-} VirtIOSCSIBlkChangeNotifier;
-
 typedef struct VirtIOSCSI {
     VirtIOSCSICommon parent_obj;
 
@@ -85,14 +78,10 @@ typedef struct VirtIOSCSI {
     /* Fields for dataplane below */
     AioContext *ctx; /* one iothread per virtio-scsi-pci for now */
 
-    QTAILQ_HEAD(, VirtIOSCSIBlkChangeNotifier) insert_notifiers;
-    QTAILQ_HEAD(, VirtIOSCSIBlkChangeNotifier) remove_notifiers;
-
     bool dataplane_started;
     bool dataplane_starting;
     bool dataplane_stopping;
     bool dataplane_fenced;
-    Error *blocker;
     uint32_t host_features;
 } VirtIOSCSI;
 
@@ -152,4 +141,4 @@ void virtio_scsi_dataplane_start(VirtIOSCSI *s);
 void virtio_scsi_dataplane_stop(VirtIOSCSI *s);
 void virtio_scsi_dataplane_notify(VirtIODevice *vdev, VirtIOSCSIReq *req);
 
-#endif /* _QEMU_VIRTIO_SCSI_H */
+#endif /* QEMU_VIRTIO_SCSI_H */
