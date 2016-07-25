@@ -142,8 +142,8 @@ struct BlockDriver {
         BlockCompletionFunc *cb, void *opaque);
     BlockAIOCB *(*bdrv_aio_flush)(BlockDriverState *bs,
         BlockCompletionFunc *cb, void *opaque);
-    BlockAIOCB *(*bdrv_aio_discard)(BlockDriverState *bs,
-        int64_t sector_num, int nb_sectors,
+    BlockAIOCB *(*bdrv_aio_pdiscard)(BlockDriverState *bs,
+        int64_t offset, int count,
         BlockCompletionFunc *cb, void *opaque);
 
     int coroutine_fn (*bdrv_co_readv)(BlockDriverState *bs,
@@ -165,8 +165,8 @@ struct BlockDriver {
      */
     int coroutine_fn (*bdrv_co_pwrite_zeroes)(BlockDriverState *bs,
         int64_t offset, int count, BdrvRequestFlags flags);
-    int coroutine_fn (*bdrv_co_discard)(BlockDriverState *bs,
-        int64_t sector_num, int nb_sectors);
+    int coroutine_fn (*bdrv_co_pdiscard)(BlockDriverState *bs,
+        int64_t offset, int count);
     int64_t coroutine_fn (*bdrv_co_get_block_status)(BlockDriverState *bs,
         int64_t sector_num, int nb_sectors, int *pnum,
         BlockDriverState **file);
@@ -439,6 +439,11 @@ struct BlockDriverState {
 
     int copy_on_read; /* if nonzero, copy read backing sectors into image.
                          note this is a reference count */
+
+    CoQueue flush_queue;            /* Serializing flush queue */
+    unsigned int write_gen;         /* Current data generation */
+    unsigned int flush_started_gen; /* Generation for which flush has started */
+    unsigned int flushed_gen;       /* Flushed write generation */
 
     BlockDriver *drv; /* NULL means no media */
     void *opaque;
@@ -779,7 +784,7 @@ void blk_dev_eject_request(BlockBackend *blk, bool force);
 bool blk_dev_is_tray_open(BlockBackend *blk);
 bool blk_dev_is_medium_locked(BlockBackend *blk);
 
-void bdrv_set_dirty(BlockDriverState *bs, int64_t cur_sector, int nr_sectors);
+void bdrv_set_dirty(BlockDriverState *bs, int64_t cur_sector, int64_t nr_sect);
 bool bdrv_requests_pending(BlockDriverState *bs);
 
 void bdrv_clear_dirty_bitmap(BdrvDirtyBitmap *bitmap, HBitmap **out);
