@@ -259,12 +259,15 @@ static int kvm_set_user_memory_region(KVMMemoryListener *kml, KVMSlot *slot)
 int kvm_destroy_vcpu(CPUState *cpu)
 {
     KVMState *s = kvm_state;
+#ifndef _WIN32
     long mmap_size;
+#endif
     struct KVMParkedVcpu *vcpu = NULL;
     int ret = 0;
 
     DPRINTF("kvm_destroy_vcpu\n");
 
+#ifndef _WIN32
     mmap_size = kvm_ioctl(s, KVM_GET_VCPU_MMAP_SIZE, 0);
     if (mmap_size < 0) {
         ret = mmap_size;
@@ -276,6 +279,12 @@ int kvm_destroy_vcpu(CPUState *cpu)
     if (ret < 0) {
         goto err;
     }
+#else
+    ret = vmmr3_put_vmmr0_run(s, cpu->kvm_fd, cpu->kvm_run);
+    if (ret < 0) {
+        goto err;
+    }
+#endif
 
     vcpu = g_malloc0(sizeof(*vcpu));
     vcpu->vcpu_id = kvm_arch_vcpu_id(cpu);

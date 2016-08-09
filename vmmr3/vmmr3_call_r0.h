@@ -160,6 +160,19 @@ static inline struct kvm_run* vmmr3_get_vmmr0_run(KVMState *s, int kvm_fd)
 	return kvm_run;
 }
 
+static inline int vmmr3_put_vmmr0_run(KVMState *s, int kvm_fd, struct kvm_run* kvm_run)
+{
+	ULONG returned;
+	struct ioctl_arg arg;
+	arg.fd = kvm_fd;
+	arg.arg = kvm_run;
+	if(!DeviceIoControl(vmmr0_handle,KVM_PUT_KVM_RUN,&arg,sizeof(arg),&kvm_run,sizeof(kvm_run),&returned,NULL))
+	{
+		return -1;
+	}
+	return 0;
+}
+
 static inline void* vmmr3_get_coalesced_mmio(KVMState *s, int kvm_fd, void* run)
 {
 	ULONG returned;

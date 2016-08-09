@@ -1285,6 +1285,7 @@ struct kvm_s390_ucas_mapping {
 #define KVM_FREE_KMEM	               VMMR3_IOWR(KVMIO,  0x7c0, __u64)
 #define KVM_BIND_EVENT                 VMMR3_IOWR(KVMIO,  0x7c2, __u64)
 #define KVM_GET_KVM_COALESCED_MMIO     VMMR3_IOWR(KVMIO,  0x7c3, __u64)
+#define KVM_PUT_KVM_RUN	               VMMR3_IOWR(KVMIO,  0x7c4, __u64)
 
 struct kvm_assigned_pci_dev {
 	__u32 assigned_dev_id;
