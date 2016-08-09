@@ -309,7 +309,11 @@ static int kvm_get_vcpu(KVMState *s, unsigned long vcpu_id)
         }
     }
 
+#ifdef _WIN32
+    return kvm_vm_ioctl(s, KVM_CREATE_VCPU, vcpu_id);
+#else
     return kvm_vm_ioctl(s, KVM_CREATE_VCPU, (void *)vcpu_id);
+#endif
 }
 
 int kvm_init_vcpu(CPUState *cpu)
@@ -2172,7 +2176,12 @@ int kvm_device_ioctl(int fd, int type, ...)
     va_end(ap);
 
     trace_kvm_device_ioctl(fd, type, arg);
+#ifdef _WIN32
+    fprintf(stderr, "Warning: kvm_device_ioctl is unimplemented.\n");
+    return -errno;
+#else
     ret = vmmr3_ioctl(fd, type, arg);
+#endif
     if (ret == -1) {
         ret = -errno;
     }
