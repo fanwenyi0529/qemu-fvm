@@ -18,14 +18,14 @@
    makes things much cleaner.  */
 QEMU_BUILD_BUG_ON(TCG_TYPE_I32 != 0 || TCG_TYPE_I64 != 1);
 
-#ifndef NDEBUG
+#ifdef CONFIG_DEBUG_TCG
 static const char * const tcg_target_reg_names[TCG_TARGET_NB_REGS] = {
     "%x0", "%x1", "%x2", "%x3", "%x4", "%x5", "%x6", "%x7",
     "%x8", "%x9", "%x10", "%x11", "%x12", "%x13", "%x14", "%x15",
     "%x16", "%x17", "%x18", "%x19", "%x20", "%x21", "%x22", "%x23",
     "%x24", "%x25", "%x26", "%x27", "%x28", "%fp", "%x30", "%sp",
 };
-#endif /* NDEBUG */
+#endif /* CONFIG_DEBUG_TCG */
 
 static const int tcg_target_reg_alloc_order[] = {
     TCG_REG_X20, TCG_REG_X21, TCG_REG_X22, TCG_REG_X23,
@@ -67,23 +67,35 @@ static const int tcg_target_call_oarg_regs[1] = {
 static inline void reloc_pc26(tcg_insn_unit *code_ptr, tcg_insn_unit *target)
 {
     ptrdiff_t offset = target - code_ptr;
-    assert(offset == sextract64(offset, 0, 26));
+    tcg_debug_assert(offset == sextract64(offset, 0, 26));
     /* read instruction, mask away previous PC_REL26 parameter contents,
        set the proper offset, then write back the instruction. */
     *code_ptr = deposit32(*code_ptr, 0, 26, offset);
 }
 
+static inline void reloc_pc26_atomic(tcg_insn_unit *code_ptr,
+                                     tcg_insn_unit *target)
+{
+    ptrdiff_t offset = target - code_ptr;
+    tcg_insn_unit insn;
+    tcg_debug_assert(offset == sextract64(offset, 0, 26));
+    /* read instruction, mask away previous PC_REL26 parameter contents,
+       set the proper offset, then write back the instruction. */
+    insn = atomic_read(code_ptr);
+    atomic_set(code_ptr, deposit32(insn, 0, 26, offset));
+}
+
 static inline void reloc_pc19(tcg_insn_unit *code_ptr, tcg_insn_unit *target)
 {
     ptrdiff_t offset = target - code_ptr;
-    assert(offset == sextract64(offset, 0, 19));
+    tcg_debug_assert(offset == sextract64(offset, 0, 19));
     *code_ptr = deposit32(*code_ptr, 5, 19, offset);
 }
 
 static inline void patch_reloc(tcg_insn_unit *code_ptr, int type,
                                intptr_t value, intptr_t addend)
 {
-    assert(addend == 0);
+    tcg_debug_assert(addend == 0);
     switch (type) {
     case R_AARCH64_JUMP26:
     case R_AARCH64_CALL26:
@@ -402,7 +414,7 @@ static void tcg_out_insn_3314(TCGContext *s, AArch64Insn insn,
     insn |= pre << 24;
     insn |= w << 23;
 
-    assert(ofs >= -0x200 && ofs < 0x200 && (ofs & 7) == 0);
+    tcg_debug_assert(ofs >= -0x200 && ofs < 0x200 && (ofs & 7) == 0);
     insn |= (ofs & (0x7f << 3)) << (15 - 3);
 
     tcg_out32(s, insn | r2 << 10 | rn << 5 | r1);
@@ -412,9 +424,9 @@ static void tcg_out_insn_3401(TCGContext *s, AArch64Insn insn, TCGType ext,
                               TCGReg rd, TCGReg rn, uint64_t aimm)
 {
     if (aimm > 0xfff) {
-        assert((aimm & 0xfff) == 0);
+        tcg_debug_assert((aimm & 0xfff) == 0);
         aimm >>= 12;
-        assert(aimm <= 0xfff);
+        tcg_debug_assert(aimm <= 0xfff);
         aimm |= 1 << 12;  /* apply LSL 12 */
     }
     tcg_out32(s, insn | ext << 31 | aimm << 10 | rn << 5 | rd);
@@ -444,7 +456,7 @@ static void tcg_out_insn_3403(TCGContext *s, AArch64Insn insn, TCGType ext,
 static void tcg_out_insn_3405(TCGContext *s, AArch64Insn insn, TCGType ext,
                               TCGReg rd, uint16_t half, unsigned shift)
 {
-    assert((shift & ~0x30) == 0);
+    tcg_debug_assert((shift & ~0x30) == 0);
     tcg_out32(s, insn | ext << 31 | shift << (21 - 4) | half << 5 | rd);
 }
 
@@ -538,7 +550,7 @@ static void tcg_out_logicali(TCGContext *s, AArch64Insn insn, TCGType ext,
 {
     unsigned h, l, r, c;
 
-    assert(is_limm(limm));
+    tcg_debug_assert(is_limm(limm));
 
     h = clz64(limm);
     l = ctz64(limm);
@@ -704,6 +716,16 @@ static inline void tcg_out_st(TCGContext *s, TCGType type, TCGReg arg,
                  arg, arg1, arg2);
 }
 
+static inline bool tcg_out_sti(TCGContext *s, TCGType type, TCGArg val,
+                               TCGReg base, intptr_t ofs)
+{
+    if (val == 0) {
+        tcg_out_st(s, type, TCG_REG_XZR, base, ofs);
+        return true;
+    }
+    return false;
+}
+
 static inline void tcg_out_bfm(TCGContext *s, TCGType ext, TCGReg rd,
                                TCGReg rn, unsigned int a, unsigned int b)
 {
@@ -793,7 +815,7 @@ static void tcg_out_cmp(TCGContext *s, TCGType ext, TCGReg a,
 static inline void tcg_out_goto(TCGContext *s, tcg_insn_unit *target)
 {
     ptrdiff_t offset = target - s->code_ptr;
-    assert(offset == sextract64(offset, 0, 26));
+    tcg_debug_assert(offset == sextract64(offset, 0, 26));
     tcg_out_insn(s, 3206, B, offset);
 }
 
@@ -835,7 +857,7 @@ void aarch64_tb_set_jmp_target(uintptr_t jmp_addr, uintptr_t addr)
     tcg_insn_unit *code_ptr = (tcg_insn_unit *)jmp_addr;
     tcg_insn_unit *target = (tcg_insn_unit *)addr;
 
-    reloc_pc26(code_ptr, target);
+    reloc_pc26_atomic(code_ptr, target);
     flush_icache_range(jmp_addr, jmp_addr + 4);
 }
 
@@ -867,7 +889,7 @@ static void tcg_out_brcond(TCGContext *s, TCGMemOp ext, TCGCond c, TCGArg a,
         offset = tcg_in32(s) >> 5;
     } else {
         offset = l->u.value_ptr - s->code_ptr;
-        assert(offset == sextract64(offset, 0, 19));
+        tcg_debug_assert(offset == sextract64(offset, 0, 19));
     }
 
     if (need_cmp) {
@@ -990,7 +1012,7 @@ static void * const qemu_st_helpers[16] = {
 static inline void tcg_out_adr(TCGContext *s, TCGReg rd, void *target)
 {
     ptrdiff_t offset = tcg_pcrel_diff(s, target);
-    assert(offset == sextract64(offset, 0, 21));
+    tcg_debug_assert(offset == sextract64(offset, 0, 21));
     tcg_out_insn(s, 3406, ADR, rd, offset);
 }
 
@@ -1059,19 +1081,20 @@ static void tcg_out_tlb_read(TCGContext *s, TCGReg addr_reg, TCGMemOp opc,
     int tlb_offset = is_read ?
         offsetof(CPUArchState, tlb_table[mem_index][0].addr_read)
         : offsetof(CPUArchState, tlb_table[mem_index][0].addr_write);
-    int s_mask = (1 << (opc & MO_SIZE)) - 1;
+    int a_bits = get_alignment_bits(opc);
     TCGReg base = TCG_AREG0, x3;
     uint64_t tlb_mask;
 
     /* For aligned accesses, we check the first byte and include the alignment
        bits within the address.  For unaligned access, we check that we don't
        cross pages using the address of the last byte of the access.  */
-    if ((opc & MO_AMASK) == MO_ALIGN || s_mask == 0) {
-        tlb_mask = TARGET_PAGE_MASK | s_mask;
+    if (a_bits >= 0) {
+        /* A byte access or an alignment check required */
+        tlb_mask = TARGET_PAGE_MASK | ((1 << a_bits) - 1);
         x3 = addr_reg;
     } else {
         tcg_out_insn(s, 3401, ADDI, TARGET_LONG_BITS == 64,
-                     TCG_REG_X3, addr_reg, s_mask);
+                     TCG_REG_X3, addr_reg, (1 << (opc & MO_SIZE)) - 1);
         tlb_mask = TARGET_PAGE_MASK;
         x3 = TCG_REG_X3;
     }
@@ -1294,12 +1317,13 @@ static void tcg_out_op(TCGContext *s, TCGOpcode opc,
 #ifndef USE_DIRECT_JUMP
 #error "USE_DIRECT_JUMP required for aarch64"
 #endif
-        assert(s->tb_jmp_offset != NULL); /* consistency for USE_DIRECT_JUMP */
-        s->tb_jmp_offset[a0] = tcg_current_code_size(s);
+        /* consistency for USE_DIRECT_JUMP */
+        tcg_debug_assert(s->tb_jmp_insn_offset != NULL);
+        s->tb_jmp_insn_offset[a0] = tcg_current_code_size(s);
         /* actual branch destination will be patched by
            aarch64_tb_set_jmp_target later, beware retranslation. */
         tcg_out_goto_noaddr(s);
-        s->tb_next_offset[a0] = tcg_current_code_size(s);
+        s->tb_jmp_reset_offset[a0] = tcg_current_code_size(s);
         break;
 
     case INDEX_op_br:

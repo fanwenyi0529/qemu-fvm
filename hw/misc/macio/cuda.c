@@ -29,6 +29,7 @@
 #include "qemu/timer.h"
 #include "sysemu/sysemu.h"
 #include "qemu/cutils.h"
+#include "qemu/log.h"
 
 /* XXX: implement all timer modes */
 
@@ -685,8 +686,8 @@ static bool cuda_cmd_set_time(CUDAState *s,
         return false;
     }
 
-    ti = (((uint32_t)in_data[1]) << 24) + (((uint32_t)in_data[2]) << 16)
-         + (((uint32_t)in_data[3]) << 8) + in_data[4];
+    ti = (((uint32_t)in_data[0]) << 24) + (((uint32_t)in_data[1]) << 16)
+         + (((uint32_t)in_data[2]) << 8) + in_data[3];
     s->tick_offset = ti - (qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL)
                            / NANOSECONDS_PER_SECOND);
     return true;

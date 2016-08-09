@@ -25,7 +25,6 @@
  */
 
 #include "qemu/osdep.h"
-#include <sys/mman.h>
 
 #include "hw/hw.h"
 #include "ui/console.h"
@@ -472,9 +471,9 @@ static int xenfb_map_fb(struct XenFB *xenfb)
         xenfb->pixels = NULL;
     }
 
-    xenfb->fbpages = (xenfb->fb_len + (XC_PAGE_SIZE - 1)) / XC_PAGE_SIZE;
+    xenfb->fbpages = DIV_ROUND_UP(xenfb->fb_len, XC_PAGE_SIZE);
     n_fbdirs = xenfb->fbpages * mode / 8;
-    n_fbdirs = (n_fbdirs + (XC_PAGE_SIZE - 1)) / XC_PAGE_SIZE;
+    n_fbdirs = DIV_ROUND_UP(n_fbdirs, XC_PAGE_SIZE);
 
     pgmfns = g_malloc0(sizeof(xen_pfn_t) * n_fbdirs);
     fbmfns = g_malloc0(sizeof(xen_pfn_t) * xenfb->fbpages);
@@ -775,7 +774,7 @@ static void xenfb_handle_events(struct XenFB *xenfb)
 
     prod = page->out_prod;
     out_cons = page->out_cons;
-    if (prod - out_cons >= XENFB_OUT_RING_LEN) {
+    if (prod - out_cons > XENFB_OUT_RING_LEN) {
         return;
     }
     xen_rmb();		/* ensure we see ring contents up to prod */

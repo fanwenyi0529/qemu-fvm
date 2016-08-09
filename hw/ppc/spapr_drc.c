@@ -140,6 +140,8 @@ static uint32_t set_allocation_state(sPAPRDRConnector *drc,
             DPRINTFN("finalizing device removal");
             drck->detach(drc, DEVICE(drc->dev), drc->detach_cb,
                          drc->detach_cb_opaque, NULL);
+        } else if (drc->allocation_state == SPAPR_DR_ALLOCATION_STATE_USABLE) {
+            drc->awaiting_allocation = false;
         }
     }
     return RTAS_OUT_SUCCESS;
@@ -269,11 +271,7 @@ static void prop_get_fdt(Object *obj, Visitor *v, const char *name,
     void *fdt;
 
     if (!drc->fdt) {
-        visit_start_struct(v, name, NULL, 0, &err);
-        if (!err) {
-            visit_end_struct(v, &err);
-        }
-        error_propagate(errp, err);
+        visit_type_null(v, NULL, errp);
         return;
     }
 
@@ -301,7 +299,8 @@ static void prop_get_fdt(Object *obj, Visitor *v, const char *name,
         case FDT_END_NODE:
             /* shouldn't ever see an FDT_END_NODE before FDT_BEGIN_NODE */
             g_assert(fdt_depth > 0);
-            visit_end_struct(v, &err);
+            visit_check_struct(v, &err);
+            visit_end_struct(v, NULL);
             if (err) {
                 error_propagate(errp, err);
                 return;
@@ -312,7 +311,7 @@ static void prop_get_fdt(Object *obj, Visitor *v, const char *name,
             int i;
             prop = fdt_get_property_by_offset(fdt, fdt_offset, &prop_len);
             name = fdt_string(fdt, fdt32_to_cpu(prop->nameoff));
-            visit_start_list(v, name, &err);
+            visit_start_list(v, name, NULL, 0, &err);
             if (err) {
                 error_propagate(errp, err);
                 return;
@@ -324,7 +323,7 @@ static void prop_get_fdt(Object *obj, Visitor *v, const char *name,
                     return;
                 }
             }
-            visit_end_list(v);
+            visit_end_list(v, NULL);
             break;
         }
         default:
@@ -364,7 +363,21 @@ static void attach(sPAPRDRConnector *drc, DeviceState *d, void *fdt,
     drc->fdt = fdt;
     drc->fdt_start_offset = fdt_start_offset;
     drc->configured = coldplug;
-    drc->signalled = coldplug;
+    /* 'logical' DR resources such as memory/cpus are in some cases treated
+     * as a pool of resources from which the guest is free to choose from
+     * based on only a count. for resources that can be assigned in this
+     * fashion, we must assume the resource is signalled immediately
+     * since a single hotplug request might make an arbitrary number of
+     * such attached resources available to the guest, as opposed to
+     * 'physical' DR resources such as PCI where each device/resource is
+     * signalled individually.
+     */
+    drc->signalled = (drc->type != SPAPR_DR_CONNECTOR_TYPE_PCI)
+                     ? true : coldplug;
+
+    if (drc->type != SPAPR_DR_CONNECTOR_TYPE_PCI) {
+        drc->awaiting_allocation = true;
+    }
 
     object_property_add_link(OBJECT(drc), "device",
                              object_get_typename(OBJECT(drc->dev)),
@@ -411,6 +424,12 @@ static void detach(sPAPRDRConnector *drc, DeviceState *d,
         drc->allocation_state != SPAPR_DR_ALLOCATION_STATE_UNUSABLE) {
         DPRINTFN("awaiting transition to unusable state before removal");
         drc->awaiting_release = true;
+        return;
+    }
+
+    if (drc->awaiting_allocation) {
+        drc->awaiting_release = true;
+        DPRINTFN("awaiting allocation to complete before removal");
         return;
     }
 

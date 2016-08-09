@@ -35,7 +35,7 @@
 #define LO_OFF    (MIPS_BE * 4)
 #define HI_OFF    (4 - LO_OFF)
 
-#ifndef NDEBUG
+#ifdef CONFIG_DEBUG_TCG
 static const char * const tcg_target_reg_names[TCG_TARGET_NB_REGS] = {
     "zero",
     "at",
@@ -127,7 +127,7 @@ static inline uint32_t reloc_pc16_val(tcg_insn_unit *pc, tcg_insn_unit *target)
 {
     /* Let the compiler perform the right-shift as part of the arithmetic.  */
     ptrdiff_t disp = target - (pc + 1);
-    assert(disp == (int16_t)disp);
+    tcg_debug_assert(disp == (int16_t)disp);
     return disp & 0xffff;
 }
 
@@ -138,7 +138,7 @@ static inline void reloc_pc16(tcg_insn_unit *pc, tcg_insn_unit *target)
 
 static inline uint32_t reloc_26_val(tcg_insn_unit *pc, tcg_insn_unit *target)
 {
-    assert((((uintptr_t)pc ^ (uintptr_t)target) & 0xf0000000) == 0);
+    tcg_debug_assert((((uintptr_t)pc ^ (uintptr_t)target) & 0xf0000000) == 0);
     return ((uintptr_t)target >> 2) & 0x3ffffff;
 }
 
@@ -150,8 +150,8 @@ static inline void reloc_26(tcg_insn_unit *pc, tcg_insn_unit *target)
 static void patch_reloc(tcg_insn_unit *code_ptr, int type,
                         intptr_t value, intptr_t addend)
 {
-    assert(type == R_MIPS_PC16);
-    assert(addend == 0);
+    tcg_debug_assert(type == R_MIPS_PC16);
+    tcg_debug_assert(addend == 0);
     reloc_pc16(code_ptr, (tcg_insn_unit *)value);
 }
 
@@ -432,7 +432,7 @@ static bool tcg_out_opc_jmp(TCGContext *s, MIPSInsn opc, void *target)
     if ((from ^ dest) & -(1 << 28)) {
         return false;
     }
-    assert((dest & 3) == 0);
+    tcg_debug_assert((dest & 3) == 0);
 
     inst = opc;
     inst |= (dest >> 2) & 0x3ffffff;
@@ -574,6 +574,16 @@ static inline void tcg_out_st(TCGContext *s, TCGType type, TCGReg arg,
                               TCGReg arg1, intptr_t arg2)
 {
     tcg_out_ldst(s, OPC_SW, arg, arg1, arg2);
+}
+
+static inline bool tcg_out_sti(TCGContext *s, TCGType type, TCGArg val,
+                               TCGReg base, intptr_t ofs)
+{
+    if (val == 0) {
+        tcg_out_st(s, type, TCG_REG_ZERO, base, ofs);
+        return true;
+    }
+    return false;
 }
 
 static inline void tcg_out_addi(TCGContext *s, TCGReg reg, TCGArg val)
@@ -807,9 +817,9 @@ static void tcg_out_setcond2(TCGContext *s, TCGCond cond, TCGReg ret,
     TCGReg tmp0 = TCG_TMP0;
     TCGReg tmp1 = ret;
 
-    assert(ret != TCG_TMP0);
+    tcg_debug_assert(ret != TCG_TMP0);
     if (ret == ah || ret == bh) {
-        assert(ret != TCG_TMP1);
+        tcg_debug_assert(ret != TCG_TMP1);
         tmp1 = TCG_TMP1;
     }
 
@@ -1397,19 +1407,19 @@ static inline void tcg_out_op(TCGContext *s, TCGOpcode opc,
         }
         break;
     case INDEX_op_goto_tb:
-        if (s->tb_jmp_offset) {
+        if (s->tb_jmp_insn_offset) {
             /* direct jump method */
-            s->tb_jmp_offset[a0] = tcg_current_code_size(s);
+            s->tb_jmp_insn_offset[a0] = tcg_current_code_size(s);
             /* Avoid clobbering the address during retranslation.  */
             tcg_out32(s, OPC_J | (*(uint32_t *)s->code_ptr & 0x3ffffff));
         } else {
             /* indirect jump method */
             tcg_out_ld(s, TCG_TYPE_PTR, TCG_TMP0, TCG_REG_ZERO,
-                       (uintptr_t)(s->tb_next + a0));
+                       (uintptr_t)(s->tb_jmp_target_addr + a0));
             tcg_out_opc_reg(s, OPC_JR, 0, TCG_TMP0, 0);
         }
         tcg_out_nop(s);
-        s->tb_next_offset[a0] = tcg_current_code_size(s);
+        s->tb_jmp_reset_offset[a0] = tcg_current_code_size(s);
         break;
     case INDEX_op_br:
         tcg_out_brcond(s, TCG_COND_EQ, TCG_REG_ZERO, TCG_REG_ZERO,
@@ -1470,8 +1480,8 @@ static inline void tcg_out_op(TCGContext *s, TCGOpcode opc,
     case INDEX_op_and_i32:
         if (c2 && a2 != (uint16_t)a2) {
             int msb = ctz32(~a2) - 1;
-            assert(use_mips32r2_instructions);
-            assert(is_p2m1(a2));
+            tcg_debug_assert(use_mips32r2_instructions);
+            tcg_debug_assert(is_p2m1(a2));
             tcg_out_opc_bf(s, OPC_EXT, a0, a1, msb, 0);
             break;
         }
@@ -1885,7 +1895,6 @@ static void tcg_target_init(TCGContext *s)
 
 void tb_set_jmp_target1(uintptr_t jmp_addr, uintptr_t addr)
 {
-    uint32_t *ptr = (uint32_t *)jmp_addr;
-    *ptr = deposit32(*ptr, 0, 26, addr >> 2);
+    atomic_set((uint32_t *)jmp_addr, deposit32(OPC_J, 0, 26, addr >> 2));
     flush_icache_range(jmp_addr, jmp_addr + 4);
 }

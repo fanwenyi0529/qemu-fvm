@@ -27,7 +27,7 @@
  * Register definitions
  */
 
-#ifndef NDEBUG
+#ifdef CONFIG_DEBUG_TCG
 static const char * const tcg_target_reg_names[TCG_TARGET_NB_REGS] = {
      "r0",  "r1",  "r2",  "r3",  "r4",  "r5",  "r6",  "r7",
      "r8",  "r9", "r10", "r11", "r12", "r13", "r14", "r15",
@@ -710,8 +710,8 @@ static uint64_t get_reloc_pcrel21b_slot2(tcg_insn_unit *pc)
 static void patch_reloc(tcg_insn_unit *code_ptr, int type,
                         intptr_t value, intptr_t addend)
 {
-    assert(addend == 0);
-    assert(type == R_IA64_PCREL21B);
+    tcg_debug_assert(addend == 0);
+    tcg_debug_assert(type == R_IA64_PCREL21B);
     reloc_pcrel21b_slot2(code_ptr, (tcg_insn_unit *)value);
 }
 
@@ -809,7 +809,7 @@ static inline void tcg_out_mov(TCGContext *s, TCGType type,
 
 static inline uint64_t tcg_opc_movi_a(int qp, TCGReg dst, int64_t src)
 {
-    assert(src == sextract64(src, 0, 22));
+    tcg_debug_assert(src == sextract64(src, 0, 22));
     return tcg_opc_a5(qp, OPC_ADDL_A5, dst, src, TCG_REG_R0);
 }
 
@@ -881,13 +881,13 @@ static void tcg_out_exit_tb(TCGContext *s, tcg_target_long arg)
 
 static inline void tcg_out_goto_tb(TCGContext *s, TCGArg arg)
 {
-    if (s->tb_jmp_offset) {
+    if (s->tb_jmp_insn_offset) {
         /* direct jump method */
         tcg_abort();
     } else {
         /* indirect jump method */
         tcg_out_movi(s, TCG_TYPE_PTR, TCG_REG_R2,
-                     (tcg_target_long)(s->tb_next + arg));
+                     (tcg_target_long)(s->tb_jmp_target_addr + arg));
         tcg_out_bundle(s, MmI,
                        tcg_opc_m1 (TCG_REG_P0, OPC_LD8_M1,
                                    TCG_REG_R2, TCG_REG_R2),
@@ -900,7 +900,7 @@ static inline void tcg_out_goto_tb(TCGContext *s, TCGArg arg)
                        tcg_opc_b4 (TCG_REG_P0, OPC_BR_SPTK_MANY_B4,
                                    TCG_REG_B6));
     }
-    s->tb_next_offset[arg] = tcg_current_code_size(s);
+    s->tb_jmp_reset_offset[arg] = tcg_current_code_size(s);
 }
 
 static inline void tcg_out_jmp(TCGContext *s, TCGArg addr)
@@ -971,6 +971,16 @@ static inline void tcg_out_st(TCGContext *s, TCGType type, TCGReg arg,
     } else {
         tcg_out_st_rel(s, OPC_ST8_M4, arg, arg1, arg2);
     }
+}
+
+static inline bool tcg_out_sti(TCGContext *s, TCGType type, TCGArg val,
+                               TCGReg base, intptr_t ofs)
+{
+    if (val == 0) {
+        tcg_out_st(s, type, TCG_REG_R0, base, ofs);
+        return true;
+    }
+    return false;
 }
 
 static inline void tcg_out_alu(TCGContext *s, uint64_t opc_a1, uint64_t opc_a3,

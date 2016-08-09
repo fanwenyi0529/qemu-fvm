@@ -53,6 +53,7 @@
  */
 
 #include "qemu/osdep.h"
+#include "cpu.h"
 
 #include <zlib.h>               /* crc32 */
 
@@ -3518,7 +3519,7 @@ static void ar7_nic_cleanup(NetClientState *ncs)
 }
 
 static NetClientInfo ar7_net_info = {
-    .type = NET_CLIENT_OPTIONS_KIND_NIC,
+    .type = NET_CLIENT_DRIVER_NIC,
     .size = sizeof(NICState),
     .can_receive = ar7_nic_can_receive,
     .receive = ar7_nic_receive,
@@ -3963,8 +3964,8 @@ static void ar7_common_init(MachineState *machine,
     }
 
     /* Init internal devices */
-    cpu_mips_irq_init_cpu(env);
-    cpu_mips_clock_init(env);
+    cpu_mips_irq_init_cpu(cpu);
+    cpu_mips_clock_init(cpu);
 
     /* Interrupt controller */
     /* The 8259 is attached to the MIPS CPU INT0 pin, ie interrupt 2 */
