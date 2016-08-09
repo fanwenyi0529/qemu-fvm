@@ -247,6 +247,7 @@ static int usb_host_init(void)
     libusb_set_debug(ctx, loglevel);
 #ifdef CONFIG_WIN32
     /* FIXME: add support for Windows. */
+    i = i; /* shutup gcc */
 #else
     libusb_set_pollfd_notifiers(ctx, usb_host_add_fd,
                                 usb_host_del_fd,
